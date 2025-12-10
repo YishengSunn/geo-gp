@@ -1,8 +1,9 @@
-import numpy as np
-from scipy.linalg import solve_triangular
-from scipy.optimize import minimize
 import torch
+import numpy as np
 import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+from scipy.linalg import solve_triangular
+
 
 class SkyGP_MOE:
     def __init__(
@@ -180,7 +181,7 @@ class SkyGP_MOE:
                     max_iter=self.LIGHT_MAXITER,
                     verbose=True,
                     window_size=self.WINDOW_SIZE,
-                    adam_lr=1e-3   # 可用你的 params["adam_lr"]
+                    adam_lr=1e-3  # 可用你的 params["adam_lr"]
                 )
                 if ok:
                     self._since_global_opt = 0  # 重置计数
@@ -549,13 +550,13 @@ class SkyGP_MOE:
         max_iter=60,          # 这里当成 Adam 的步数 steps
         verbose=False,
         window_size=None,
-        adam_lr=0.00001,         # ✅ Adam 学习率
+        adam_lr=0.00001,      # ✅ Adam 学习率
         weight_decay=0.0,     # 可选 L2 正则
         jitter=1e-6           # 数值稳定的抖动
     ):
         """
-        仅对 expert_idx 的第 p 个输出维度做窗口化 MLE，用 PyTorch Adam 优化 log-超参。
-        成功后回填到 numpy，并重建该专家的 Cholesky（update_param）。
+        仅对 expert_idx 的第 p 个输出维度做窗口化 MLE, 用 PyTorch Adam 优化 log-超参。
+        成功后回填到 numpy, 并重建该专家的 Cholesky(update_param)。
         """
         # 添加到函数开始处
         losses = []
