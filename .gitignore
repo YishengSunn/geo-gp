@@ -7,7 +7,4 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
-
-# Zip files
-*.zip
+**/.DS_Store
