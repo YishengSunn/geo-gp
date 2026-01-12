@@ -34,7 +34,7 @@ def save_csv(app):
         ])
 
         # Various trajectory points (may have different lengths)
-        ref = np.asarray(app.ref_pts, dtype=np.float32) if app.ref_pts else np.zeros((0, 2))
+        ref = np.asarray(app.refs[-1]['raw'], dtype=np.float32) if app.refs and len(app.refs[-1]['raw']) > 0 else np.zeros((0, 2))
         sampled = app.sampled.numpy() if app.sampled is not None else np.zeros((0, 2))
         probe = np.asarray(app.probe_pts, dtype=np.float32) if app.probe_pts else np.zeros((0, 2))
 
@@ -93,20 +93,20 @@ def save_csv(app):
 
             w.writerow(row)
 
-    # ---------- New: Export reference trajectory only ----------
-    # Prefer to export the evenly timed sampled reference trajectory (used for training), fallback to original ref_pts if not available
-    if app.sampled is not None and len(app.sampled) > 0:
-        ref_for_export = app.sampled.detach().cpu().numpy().astype(np.float64)
-        header = ["x", "y"]  # Evenly timed sampling
-    else:
-        ref_for_export = np.asarray(app.ref_pts, dtype=np.float64) if app.ref_pts else np.zeros((0, 2))
-        header = ["x", "y"]  # Original hand-drawn
+    # # ---------- New: Export reference trajectory only ----------
+    # # Prefer to export the evenly timed sampled reference trajectory (used for training), fallback to original ref_pts if not available
+    # if app.sampled is not None and len(app.sampled) > 0:
+    #     ref_for_export = app.sampled.detach().cpu().numpy().astype(np.float64)
+    #     header = ["x", "y"]  # Evenly timed sampling
+    # else:
+    #     ref_for_export = np.asarray(app.ref_pts, dtype=np.float64) if app.ref_pts else np.zeros((0, 2))
+    #     header = ["x", "y"]  # Original hand-drawn
 
-    with open(fname_ref, "w", newline="") as f2:
-        w2 = csv.writer(f2)
-        w2.writerow(header)
-        for i in range(len(ref_for_export)):
-            w2.writerow([ref_for_export[i, 0], ref_for_export[i, 1]])
+    # with open(fname_ref, "w", newline="") as f2:
+    #     w2 = csv.writer(f2)
+    #     w2.writerow(header)
+    #     for i in range(len(ref_for_export)):
+    #         w2.writerow([ref_for_export[i, 0], ref_for_export[i, 1]])
 
     print(f"Saved comprehensive data: {fname_all}")
     print(f"Saved reference trajectory only: {fname_ref} (Preferably evenly timed sampling)")
