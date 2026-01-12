@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import torch
+import traceback
 import numpy as np
 import matplotlib.pyplot as plt
 
 from config.runtime import (
     SEED, TRAIN_RATIO, SAMPLE_HZ, DEFAULT_SPEED, 
     K_HIST, METHOD_ID, METHOD_CONFIGS, 
-    MATCH_MODE, MIN_START_ANGLE_DIFF,
+    MATCH_MODE, MIN_START_ANGLE_DIFF, ANCHOR_ANGLE,
+    SELECT_HORIZON
 )
 from geometry.angles import (
     angle_diff_mod_pi, build_relative_angles, last_window_rel_angles, crossed_multi_in_angle_rel,
@@ -16,8 +18,14 @@ from geometry.resample import resample_polyline_equal_dt
 from geometry.transforms import align_and_scale_gp_prediction
 from gp.dataset import build_dataset, time_split
 from gp.model import train_gp, gp_predict, rollout_reference
+from matching.align import plot_vectors_at_angle_ref_probe
+from matching.ref_selection import choose_best_ref_by_mse
 from ui.handlers import on_press, on_release, on_move, on_key
-from utils.misc import torch_to_np, smooth_prediction_by_velocity
+from utils.misc import (
+    torch_to_np, closest_index, 
+    moving_average_centered, smooth_prediction_by_velocity, 
+    load_traj_all_csv
+)
 
 
 np.random.seed(SEED)
@@ -47,20 +55,24 @@ class DrawGPApp:
         self.probe_predict_mode = 'probe-based'  # 'probe-based' or 'anchor-based'
         self.rollout_horizon = 2000      # Baseline rollout horizon
 
-        # ---- Prediction smoothing ----
-        self.smooth_enabled = False       # smooth predicted polyline in probe/world frame
-        self.smooth_win = 9              # centered MA window on per-step velocity
-        self.smooth_blend_first = 0.8    # keep continuity with probe exiting direction
-
         # ---- Anchors / states ----
         self.anchors = []                # List of anchor points
         self.anchor_step = 50            # Steps between anchors
         self.anchor_markers = []         # Anchor marker artists
         self.show_anchors = False        # Whether to show anchor markers
-        self.ref_rel_angle = None        # Relative angle sequence of reference trajectory
-        self.current_anchor_ptr = 0
+        self.current_anchor_ptr = 0      # Pointer to current anchor
+        self.last_probe_angle = 0.0      # Last probe angle for crossing detection
         self.anchor_window = K_HIST      # Window size for angle estimation, used in on_move
+        self.ref_rel_angle = None        # Relative angle sequence of reference trajectory
         self.goal_stop_eps = 0.05        # Goal reaching threshold for stopping rollout, used in predict_on_transformed_probe
+
+        # ---- Prediction smoothing ----
+        self.smooth_enabled = False       # smooth predicted polyline in probe/world frame
+        self.smooth_win = 10             # centered MA window on per-step velocity
+        self.smooth_blend_first = 0.8    # keep continuity with probe exiting direction
+
+        # --- Prediction cancellation ID ---
+        self.prediction_id = 0           # Incremented on new probe drawing to cancel ongoing predictions
 
         # --- Prepare a color cycle during class initialization (e.g., 10 colors cycling) ---
         self.past_colors = ["green"] + ["orange"]
@@ -102,7 +114,7 @@ class DrawGPApp:
         self.line_ref, = self.ax.plot([], [], '-', color='red', lw=3.0, label='Demonstration')  # Demo trajectory (reference)
         self.line_probe, = self.ax.plot([], [], '-', color='black', lw=3.0, label='Prompt')  # Probe trajectory
         self.line_ps, = self.ax.plot([], [], '-', color='blue', lw=3.0, label='Prediction')  # Predicted trajectory
-        self.line_raw, = self.ax.plot([], [], '-', color='orange', lw=2.0, label='Unsmoothed Prediction', visible=self.smooth_enabled)  # Raw predicted trajectory
+        self.line_smooth, = self.ax.plot([], [], '-', color='orange', lw=3.0, visible=self.smooth_enabled, alpha=0.75)  # Smoothed predicted trajectory
         self.line_samp, = self.ax.plot([], [], '.', color='#FF7F0E', markersize=2, visible=False)
         self.line_seed, = self.ax.plot([], [], '-', color='black', lw=1.5, visible=False)
         self.line_gt, = self.ax.plot([], [], '-', color='purple', lw=1.0, visible=False)
@@ -140,6 +152,10 @@ class DrawGPApp:
             return
 
         sampled = resample_polyline_equal_dt(self.ref_pts, SAMPLE_HZ, DEFAULT_SPEED)  # Shape: (N, 2)
+
+        if self.smooth_enabled:
+            sampled = moving_average_centered(sampled, win=self.smooth_win)
+
         if sampled.shape[0] < K_HIST + 2:
             print(f"Too few samples {sampled.shape[0]} < {K_HIST+2}!")
             print("Training aborted...")
@@ -160,13 +176,14 @@ class DrawGPApp:
         color_idx = self.ref_counter % len(self.past_colors)
         past_color = self.past_colors[color_idx]
         self.ref_counter += 1
+        self.line_ref.set_data(self.sampled[:,0], self.sampled[:,1])
         self.line_ref.set_zorder(1)
         self.line_ref.set_linewidth(3.0)
         self.line_ref.set_color(past_color)
         self.line_ref.set_label(f"Demonstration #{self.ref_counter}")
         self.past_ref_lines.append(self.line_ref)
 
-        # Create a new line_ref for the current reference to avoid overwriting past references —— 
+        # Create a new line_ref for the current reference to avoid overwriting past references
         x_new, y_new = [], []
         self.line_ref, = self.ax.plot(
             x_new, y_new, color="red", linewidth=3.0, label="Current Demonstration"
@@ -295,7 +312,7 @@ class DrawGPApp:
             print()
             return
 
-        # --- Step 1: probe → ref frame ? ---
+        # --- Step 1: probe → ref frame---
         probe_np = np.asarray(self.probe_pts, dtype=np.float64)
 
         # --- Step 2: baseline rollout in probe frame ---
@@ -343,6 +360,9 @@ class DrawGPApp:
         """
         print("Probe-based rollout prediction using SkyGP model started...")
 
+        self.prediction_id += 1
+        local_pred_id = self.prediction_id
+
         if not hasattr(self, "best_ref") or self.best_ref is None:
             print("Best reference trajectory not found (please draw probe first)!")
             print("Probe-based rollout prediction using SkyGP model aborted...")
@@ -379,14 +399,19 @@ class DrawGPApp:
         self.probe_goal = probe_goal
 
         # Step 4: point-by-point rollout (h = 1 per step)
-        # self.pred_scaled = []  # Reset predicted points
-        self.pred_scaled = []       # displayed (optionally smoothed) prediction points in world/probe frame
-        self.pred_scaled_raw = []   # raw (unsmoothed) prediction points in world/probe frame
+        self.pred_scaled = []  # Unsmoothed prediction points in world/probe frame
+        self.pred_smooth = []  # Smoothed prediction points in world/probe frame
         cur_hist = probe_in_ref.copy()  # Current history trajectory (in ref frame)
         input_type, output_type = METHOD_CONFIGS[METHOD_ID]
         rollout_horizon = self.rollout_horizon
 
         for step in range(rollout_horizon):
+            if local_pred_id != self.prediction_id:
+                self.update_scaled_pred()
+                print("Prediction cancelled by new prompt.")
+                print()
+                return
+
             preds_ref, _, _, vars_ref = rollout_reference(
                 model_info,
                 torch.tensor(cur_hist, dtype=torch.float32),
@@ -397,40 +422,15 @@ class DrawGPApp:
                 output_type=output_type
             )
 
-            # Take the last predicted point
-            next_ref = preds_ref[-1].numpy()
-            cur_hist = np.vstack([cur_hist, next_ref])  # Update history
+            next_ref = preds_ref[-1].numpy()                     # Take the last predicted point
+            next_pos_world = probe_origin + spatial_scale * np.dot(next_ref, R_fwd.T)  # Transform back to probe frame
+            self.pred_scaled.append(next_pos_world)              # Store unsmoothed prediction
 
-            # Transform back to probe frame
-            next_pos_world = probe_origin + spatial_scale * np.dot(next_ref, R_fwd.T)
+            if step % 10 == 0:
+                self.update_scaled_pred(np.array(self.pred_scaled))
+                plt.pause(0.001)
 
-            # Dynamically refresh GUI
-            # self.pred_scaled.append(next_pos_world)
-            # arr = np.array(self.pred_scaled)
-            # self.update_scaled_pred(arr)  # Refresh on each append
-            # plt.pause(0.001)
-
-            # Save raw prediction
-            self.pred_scaled_raw.append(next_pos_world)
-
-            # Optionally smooth: smooth velocities using both past/future within the predicted segment
-            if self.smooth_enabled:
-                pred_raw_arr = np.asarray(self.pred_scaled_raw, dtype=np.float64)
-                pred_scaled_arr = smooth_prediction_by_velocity(
-                    probe_xy=probe_np,
-                    pred_xy=pred_raw_arr,
-                    win=self.smooth_win,
-                    blend_first_step=self.smooth_blend_first,
-                )
-            else:
-                pred_scaled_arr = np.asarray(self.pred_scaled_raw, dtype=np.float64)
-
-            self.pred_scaled = np.asarray(pred_scaled_arr, dtype=np.float64)
-
-            # Update plot less frequently for performance
-            self.update_scaled_pred(np.asarray(self.pred_scaled, dtype=np.float64))
-            self.update_scaled_pred_raw(np.asarray(self.pred_scaled_raw, dtype=np.float64))
-            plt.pause(0.001)
+            cur_hist = np.vstack([cur_hist, next_ref])           # Update history
 
             # Truncation logic
             if self.probe_goal is not None:
@@ -438,6 +438,19 @@ class DrawGPApp:
                 if d <= self.goal_stop_eps and np.max(vars_ref) > 0.001:
                     print(f"Probe-based truncation: step={step}, d={d:.3f}, var={np.max(vars_ref):.3f}")
                     break
+
+        # Step 5: post-process: optional smoothing (display only, no feedback to GP)
+        if self.smooth_enabled and len(self.pred_scaled) >= 2:
+            pred_raw_arr = np.asarray(self.pred_scaled, dtype=np.float64)
+            pred_smooth = smooth_prediction_by_velocity(
+                probe_xy=probe_np,
+                pred_xy=pred_raw_arr,
+                win=self.smooth_win,
+                blend_first_step=self.smooth_blend_first,
+            )
+            self.update_scaled_pred_smoothed(pred_smooth)
+        else:
+            self.update_scaled_pred_smoothed([])
 
         print("Probe-based rollout prediction using SkyGP model completed...")
         print()
@@ -456,7 +469,6 @@ class DrawGPApp:
         - ref-based: rollout on the reference trajectory, then map to the probe coordinate system
         - probe-based: directly use the probe's seed rollout, independent of the reference trajectory
         """
-
         print("Matching and scaling prediction started...")
         print()
 
@@ -532,31 +544,180 @@ class DrawGPApp:
 
         print()
 
+    def process_probe_and_predict(self, *, probe_already_sampled=False):
+        """
+        Process the drawn probe trajectory:
+        1) Resample probe with equal time intervals
+        2) Select the best matching reference trajectory (MSE selection)
+        3) Visualization: angle change comparison + reference/target vectors
+        4) Perform matching and scaling prediction
+        5) Clear temporary probe states in reference trajectories
+        6) Update the scaled prediction line and print relevant information
+        7) Calculate and print MSE if ground truth is available
+        8) If probe_already_sampled is True, skip resampling step
+
+        Args:
+            probe_already_sampled (bool): If True, skip the resampling step.
+        """
+        print("Probe drawing completed, processing probe trajectory...")
+        print()
+
+        # Right button release: end probe drawing
+        if self.drawing_right:
+            self.drawing_right = False
+
+        # 1) Resample probe with equal time intervals (same as reference trajectory)
+        if len(self.probe_pts) >= 2:
+            probe_raw = np.asarray(self.probe_pts, dtype=np.float32)
+
+            # Resample with equal time intervals, same as in handle_train for reference trajectory
+            probe_eq = resample_polyline_equal_dt(probe_raw, SAMPLE_HZ, DEFAULT_SPEED) if not probe_already_sampled else probe_raw
+
+            if self.smooth_enabled:
+                probe_eq = moving_average_centered(probe_eq, win=self.smooth_win)
+                self.update_probe_line()
+
+            # Fallback: keep at least two points
+            if probe_eq.shape[0] >= 2:
+                print(f"Probe resampled with equal time intervals: {len(probe_raw)} → {len(probe_eq)} points")
+                self.probe_pts = probe_eq.tolist()
+                self.update_probe_line()
+        else:
+            print("Probe has insufficient points for resampling/matching!")
+            # Continue anyway to let subsequent logic provide clearer errors/prompts
+
+        # 2) Select the reference trajectory that best matches the probe (MSE selection)
+        if hasattr(self, "refs") and self.refs:
+            probe_eq_np  = np.asarray(self.probe_pts, dtype=np.float64)
+            probe_raw_np = np.asarray(probe_raw, dtype=np.float64) if 'probe_raw' in locals() else probe_eq_np
+            best_idx, best_pack, best_mse = choose_best_ref_by_mse(
+                self.refs, probe_eq_np, probe_raw_np, horizon=SELECT_HORIZON, align_on_anchor=False
+            )
+            print(f"Reference trajectory selection results: best_idx={best_idx}, best_mse={best_mse:.6f}")
+            if best_idx is not None:
+                self.best_ref = self.refs[best_idx]
+                out, dtheta, scale = best_pack
+                self.anchor = out
+                self.dtheta_manual = dtheta
+                self.scale_manual  = scale
+                print(f"Best reference #{best_idx} | MSE@{SELECT_HORIZON}={best_mse:.6f} | "
+                      f"Δθ={np.degrees(dtheta):.1f}° | s={scale:.3f}")
+
+                # Map original anchor points to "resampled indices" for other visualizations
+                ref_resampled   = self.best_ref["sampled"].detach().cpu().numpy()
+                probe_resampled = np.asarray(self.probe_pts, dtype=np.float64)
+                self.seed_end   = closest_index(self.anchor["ref_point"], ref_resampled)
+                self.probe_end  = closest_index(self.anchor["probe_point"], probe_resampled)
+            else:
+                self.best_ref = None
+                print("MSE selection failed: no available reference!")
+        else:
+            self.best_ref = None
+            print("No trained reference trajectories available (refs is empty)!")
+
+        # 3) Visualization: angle change comparison + reference/target vectors
+        try:
+            if self.best_ref is not None and len(self.probe_pts) > 1:
+                ref_np = self.best_ref['sampled'].detach().cpu().numpy()
+                probe_np = np.asarray(self.probe_pts, dtype=np.float64)  # Already resampled probe
+
+                # Angle change comparison (relative to start tangent)
+                # plot_angle_changes(ref_np, probe_np, k_hist=K_HIST)
+
+                # Target angle vector visualization (example uses 1 rad, can be connected to UI as needed)
+                # angle_target = 0.5 
+                angle_target = ANCHOR_ANGLE
+                out = plot_vectors_at_angle_ref_probe(
+                    ref_np, probe_np,
+                    angle_target=angle_target,
+                    k_hist=K_HIST,
+                    n_segments_base=10
+                )
+                self.seed_end = out['ref_index']
+                self.probe_end = out['probe_index']
+                v_ref = out['ref_vector']
+                v_pro = out['probe_vector']
+
+                self.dtheta_manual = float(np.arctan2(v_pro[1], v_pro[0]) - np.arctan2(v_ref[1], v_ref[0]))
+                self.scale_manual = float(np.linalg.norm(v_pro) / max(np.linalg.norm(v_ref), 1e-6))
+                print(f"Target vector comparison: Δθ={np.degrees(self.dtheta_manual):.1f}°, scale={self.scale_manual:.3f}")
+            else:
+                print("Insufficient reference or probe points to plot angle/vector comparison!")
+        except Exception as e:
+            print(f"Visualization exception: {e}!")
+            traceback.print_exc()
+        
+        # 4) Perform matching and scaling prediction (ref-based / probe-based decided internally)
+        try:
+            self.match_and_scale_predict()
+        except Exception as e:
+            print(f"Matching/prediction exception: {e}!")
+            traceback.print_exc()
+
+        # 5) Clear all temporary probe states in reference trajectories (prepare for next drawing)
+        if hasattr(self, "refs"):
+            for ref in self.refs:
+                ref['current_anchor_ptr'] = 0
+                ref['probe_crossed_set'] = set()
+                ref['lookahead_buffer'] = None
+                ref['reached_goal'] = False
+                for a in ref.get('anchors', []):
+                    a.pop('probe_idx', None)
+        
+        print("Probe processing completed...")
+        print()
+
     # ============================================================
     # Handlers for UI Actions
     # ============================================================
 
-    # Seed Adjustment
-    def move_seed(self, delta):
+    def load_from_csv(self, path):
         """
-        Move the seed_end index by delta steps.
-
+        Load reference and probe trajectories from CSV files.
+        
         Args:
-            delta (int): Number of steps to move the seed_end index.
+            path (str): Path to the CSV file containing trajectory data.
         """
-        print(f"Moving seed_end by {delta} steps...")
+        print(f"Loading trajectories from CSV: {path}...")
 
-        if self.sampled is None:
-            print("Please train first (T)!")
-            print("Move seed_end aborted...")
+        if (not path.endswith('.csv')):
+            print("Please provide a valid CSV file path!")
+            print("Loading aborted...")
             print()
             return
         
-        new_end = (self.seed_end if self.seed_end is not None else (K_HIST - 1)) + int(delta)
-        self.seed_end = max(K_HIST-1, min(self.sampled.shape[0]-2, new_end))  # K_HIST-1 ≤ seed_end ≤ len(sampled)-2
-        self.update_seed_line()
-        print(f"Seed_end={self.seed_end}")
-        print("Move seed_end completed...")
+        self.ax.set_xscale("linear")
+        self.ax.set_yscale("linear")
+
+        ref, sampled, probe = load_traj_all_csv(path)
+
+        # Reset states
+        self.reset_probe_session()
+        self.ref_pts.clear()
+        self.probe_pts.clear()
+        self.sampled = None
+
+        # Load data
+        if len(ref) > 0:
+            self.ref_pts = ref.tolist()
+
+        if len(probe) > 0:
+            self.probe_pts = probe.tolist()
+
+        if len(sampled) > 0:
+            self.sampled = torch.tensor(sampled, dtype=torch.float32)
+
+        self.update_ref_line()
+        self.update_probe_line()
+        self.fig.canvas.draw_idle()
+
+        print("Trajectories loaded from CSV...")
+        print(
+            f"Loaded CSV:\n"
+            f"  ref_pts   = {len(ref)}\n"
+            f"  sampled   = {len(sampled)}\n"
+            f"  probe_pts = {len(probe)}"
+        )
         print()
 
     # Start a new reference trajectory
@@ -578,6 +739,34 @@ class DrawGPApp:
         print("Started a new reference trajectory (previous trained references kept).")
         print()
 
+    def reset_probe_session(self):
+        """
+        Reset the current probe session: clear probe points and related states.
+        """
+        self.prediction_id += 1
+
+        self.update_scaled_pred([])
+        self.update_scaled_pred_smoothed([])
+
+        self.probe_pts.clear()
+        self.update_probe_line()
+
+        self.last_probe_angle = 0.0
+        self.current_anchor_ptr = 0
+        self.best_ref = None
+
+        for ref in self.refs:
+            ref['current_anchor_ptr'] = 0
+            ref['probe_crossed_set'] = set()
+            ref['lookahead_buffer'] = None
+            ref['reached_goal'] = False
+            for a in ref.get('anchors', []):
+                a.pop('probe_idx', None)
+                a.pop('t_probe', None)
+
+        self.drawing_right = False
+        self.drawing_left = False
+
     # Clear all data and visualization
     def clear_all(self):
         """
@@ -585,9 +774,13 @@ class DrawGPApp:
         """
         print("Clearing all data and visualization...")
         
+        self.refs.clear()
         self.ref_pts.clear()
         self.probe_pts.clear()
-        self.sampled=None; self.model_info=None; self.seed_end=None; self.probe_end=None
+        self.sampled = None
+        self.model_info = None
+        self.seed_end = None
+        self.probe_end = None
 
         # —— Clear anchor data and visualization ——
         self.anchors = []
@@ -613,7 +806,7 @@ class DrawGPApp:
         self.update_probe_line()
         self.update_sample_line()
         self.update_scaled_pred(None)
-        self.update_scaled_pred_raw(None)
+        self.update_scaled_pred_smoothed(None)
         self.update_ref_pred_gt(None, None)
         self.update_seed_line()
 
@@ -626,7 +819,35 @@ class DrawGPApp:
                     pass
             self.past_ref_lines = []
         self.ref_counter = 0
+
+        self.line_smooth.set_visible(self.smooth_enabled)
+        self.ax.legend()
+        self.fig.canvas.draw_idle()
+
         print("All data and visualization cleared.")
+        print()
+
+    # Seed Adjustment
+    def move_seed(self, delta):
+        """
+        Move the seed_end index by delta steps.
+
+        Args:
+            delta (int): Number of steps to move the seed_end index.
+        """
+        print(f"Moving seed_end by {delta} steps...")
+
+        if self.sampled is None:
+            print("Please train first (T)!")
+            print("Move seed_end aborted...")
+            print()
+            return
+        
+        new_end = (self.seed_end if self.seed_end is not None else (K_HIST - 1)) + int(delta)
+        self.seed_end = max(K_HIST-1, min(self.sampled.shape[0]-2, new_end))  # K_HIST-1 ≤ seed_end ≤ len(sampled)-2
+        self.update_seed_line()
+        print(f"Seed_end={self.seed_end}")
+        print("Move seed_end completed...")
         print()
             
     # ============================================================
@@ -827,20 +1048,20 @@ class DrawGPApp:
             self.pred_scaled = []
         self.fig.canvas.draw_idle()
 
-    def update_scaled_pred_raw(self, preds_scaled_raw=None):
+    def update_scaled_pred_smoothed(self, preds_scaled_smooth=None):
         """
-        Update the raw scaled prediction trajectory line based on current preds_scaled_raw.
+        Update the smoothed scaled prediction trajectory line based on current preds_scaled_raw.
 
         Args:
             preds_scaled_raw (list or np.ndarray): List or array of raw predicted points in world frame.
         """
-        if preds_scaled_raw is not None and len(preds_scaled_raw) > 0:
-            arr = np.array(preds_scaled_raw)  # Convert to numpy for plotting
-            self.line_raw.set_data(arr[:, 0], arr[:, 1])
+        if preds_scaled_smooth is not None and len(preds_scaled_smooth) > 0:
+            arr = np.array(preds_scaled_smooth)  # Convert to numpy for plotting
+            self.line_smooth.set_data(arr[:, 0], arr[:, 1])
         
         # Clear to empty list
         else:
-            self.line_raw.set_data([], [])
+            self.line_smooth.set_data([], [])
         self.fig.canvas.draw_idle()
 
     def update_sample_line(self):
