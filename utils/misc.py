@@ -1,5 +1,5 @@
+import csv
 import numpy as np
-import torch
 
 
 # ============================================================
@@ -133,7 +133,7 @@ def smooth_prediction_by_velocity(
 
     Args:
         probe_xy: (Np, 2) probe points in world/probe frame
-        pred_xy:  (Hp, 2) predicted points in world/probe frame (future, starting AFTER probe end)
+        pred_xy: (Hp, 2) predicted points in world/probe frame (future, starting AFTER probe end)
         win: centered moving-average window (odd preferred)
         blend_first_step: blend factor for the first predicted delta:
             v0_smooth = blend_first_step * v0_probe + (1-blend_first_step) * v0_pred
@@ -172,3 +172,38 @@ def smooth_prediction_by_velocity(
         out[i] = cur
 
     return out
+
+def load_traj_all_csv(path):
+    """
+    Load trajectories from traj_all_*.csv exported by save_csv.
+
+    Returns:
+        ref_pts:   (N,2) np.ndarray
+        sampled:   (M,2) np.ndarray
+        probe_pts: (K,2) np.ndarray
+    """
+    ref_pts = []
+    sampled = []
+    probe_pts = []
+
+    with open(path, "r") as f:
+        reader = csv.DictReader(f)
+
+        for row in reader:
+            # Reference trajectory
+            if row["ref_x"] != "" and row["ref_y"] != "":
+                ref_pts.append([float(row["ref_x"]), float(row["ref_y"])])
+
+            # Sampled points
+            if row["sampled_x"] != "" and row["sampled_y"] != "":
+                sampled.append([float(row["sampled_x"]), float(row["sampled_y"])])
+
+            # Probe points
+            if row["probe_x"] != "" and row["probe_y"] != "":
+                probe_pts.append([float(row["probe_x"]), float(row["probe_y"])])
+
+    return (
+        np.asarray(ref_pts, dtype=np.float64),
+        np.asarray(sampled, dtype=np.float64),
+        np.asarray(probe_pts, dtype=np.float64),
+    )
