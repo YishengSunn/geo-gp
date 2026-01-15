@@ -1,8 +1,4 @@
-import numpy as np
-import traceback
-
-from config.runtime import K_HIST, SAMPLE_HZ, DEFAULT_SPEED, ANCHOR_ANGLE, SELECT_HORIZON
-from geometry.angles import angles_relative_to_start_tangent, crossed_multi_in_angle_rel
+from config.runtime import SAMPLE_HZ
 from viz.plot_traj import plot_series_and_mse
 from viz.export_csv import save_csv
 
@@ -68,32 +64,6 @@ def on_move(app, event):
     if app.drawing_right:
         app.probe_pts.append([event.xdata, event.ydata])
         app.update_probe_line()
-
-        # Check crossing of anchors
-        app.probe_check_cross_current_anchor()
-
-        # Calculate probe relative angle (relative to probe start tangent)
-        probe_np = np.asarray(app.probe_pts, dtype=np.float64)
-        if probe_np.shape[0] >= 2:
-            probe_rel_angle, mask = angles_relative_to_start_tangent(probe_np, k_hist=K_HIST, min_r=1e-6)
-            if mask[-1]:
-                th_cur = float(probe_rel_angle[-1])
-                app.last_probe_angle = th_cur
-
-    # Only check if all anchors have been crossed in order, then check if the end angle is crossed
-    if hasattr(app, 'refs') and app.refs:
-        for ref in app.refs:
-            # All anchors have been crossed
-            if len(ref['probe_crossed_set']) == len(ref['anchors']):
-                final_angle = float(ref['anchors'][-1]['angle'])  # Final anchor angle
-                if not ref.get('reached_goal', False) and len(app.probe_pts) >= 2:
-                    th1, mask = angles_relative_to_start_tangent(app.probe_pts, k_hist=K_HIST, min_r=1e-6)
-                    if mask[-1]:
-                        th_cur = float(th1[-1])
-                        crossed, _ = crossed_multi_in_angle_rel(app.last_probe_angle, th_cur, [final_angle])
-                        if crossed:
-                            ref['reached_goal'] = True
-                            print("All anchors crossed in order, and final angle crossed! Task completed!")
 
 def on_release(app, event):
     """
