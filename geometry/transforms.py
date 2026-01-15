@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 
+from geometry.angles import angles_relative_to_start_tangent, first_index_reach_threshold
 from geometry.resample import resample_to_k
 from config.runtime import K_HIST
 
@@ -177,3 +178,171 @@ def align_and_scale_gp_prediction(
 
     else:
         raise ValueError("Mode must be 'angle' or 'manual'")
+    
+def estimate_rigid_transform_2d(
+    ref_anchor_pts,
+    probe_anchor_pts,
+    *,
+    mode: str = "least_squares",
+    eps: float = 1e-8,
+):
+    """
+    Estimate 2D rotation (Δθ) and isotropic scale that best aligns ref_anchor_pts → probe_anchor_pts in least-squares sense.
+
+    Args:
+        ref_anchor_pts : (N, 2) reference anchor points
+        probe_anchor_pts : (N, 2) probe anchor points
+        mode : currently only 'least_squares'
+        eps : numerical stability
+
+    Returns:
+        dtheta : float (radians), rotation from ref → probe
+        scale : float, isotropic scale
+    """
+    ref_anchor_pts = np.asarray(ref_anchor_pts, dtype=np.float64)
+    probe_anchor_pts = np.asarray(probe_anchor_pts, dtype=np.float64)
+
+    assert ref_anchor_pts.shape == probe_anchor_pts.shape
+    assert ref_anchor_pts.ndim == 2 and ref_anchor_pts.shape[1] == 2
+    assert ref_anchor_pts.shape[0] >= 2, "At least 2 points required"
+
+    # 1) Remove centroids (translation-free estimation)
+    ref_centroid = ref_anchor_pts.mean(axis=0)
+    probe_centroid = probe_anchor_pts.mean(axis=0)
+
+    X = ref_anchor_pts - ref_centroid
+    Y = probe_anchor_pts - probe_centroid
+
+    # 2) Solve rotation using SVD (Procrustes)
+    H = X.T @ Y
+    U, _, Vt = np.linalg.svd(H)
+
+    R = Vt.T @ U.T
+
+    # Fix possible reflection
+    if np.linalg.det(R) < 0:
+        Vt[-1, :] *= -1
+        R = Vt.T @ U.T
+
+    # 3) Extract rotation angle
+    dtheta = np.arctan2(R[1, 0], R[0, 0])
+
+    # 4) Estimate isotropic scale
+    X_rot = X @ R.T
+    scale = np.sum(Y * X_rot) / (np.sum(X_rot ** 2) + eps)
+
+    return float(dtheta), float(scale)
+
+def estimate_dtheta_scale_by_multi_angles(
+    ref_xy,
+    probe_xy,
+    *,
+    angle_start_deg=5,
+    angle_end_deg=30,
+    angle_step_deg=5,
+    k_hist=10,
+    min_r=1e-6,
+    weights=None,
+):
+    """
+    Estimate rotation (Δθ) and isotropic scale between ref_xy and probe_xy using multiple angle anchors.
+
+    Args:
+        ref_xy : list or numpy array of shape (N, 2), reference trajectory points
+        probe_xy : list or numpy array of shape (M, 2), probe trajectory points
+        angle_start_deg : float, starting angle in degrees for anchors
+        angle_end_deg : float, ending angle in degrees for anchors
+        angle_step_deg : float, step size in degrees for anchors
+        k_hist : int, history length for angle computation
+        min_r : float, minimum radius to consider an anchor valid
+        weights : list or numpy array of shape (L,), optional weights for averaging
+    
+    Returns:
+        dtheta_mean : float, estimated rotation (radians) from ref → probe
+        scale_mean : float, estimated isotropic scale from ref → probe
+        debug : dict, debug information including used angles and individual estimates
+    """
+    ref_xy = np.asarray(ref_xy, dtype=np.float64)
+    probe_xy = np.asarray(probe_xy, dtype=np.float64)
+
+    # 1) Relative angles
+    ref_th, ref_mask = angles_relative_to_start_tangent(ref_xy, k_hist=k_hist, min_r=min_r)
+    pro_th, pro_mask = angles_relative_to_start_tangent(probe_xy, k_hist=k_hist, min_r=min_r)
+
+    if ref_th is None or pro_th is None:
+        raise ValueError("Failed to compute relative angles")
+
+    # 2) Target angles (radians)
+    target_angles = np.deg2rad(np.arange(angle_start_deg, angle_end_deg + 1e-9, angle_step_deg))
+
+    dtheta_list = []
+    scale_list  = []
+    angle_used  = []
+    weight_list = []
+
+    ref_origin = ref_xy[0]
+    probe_origin = probe_xy[0]
+
+    for i, ang in enumerate(target_angles):
+        ref_idx = first_index_reach_threshold(
+            ref_th,
+            ref_mask,
+            ang,
+            inclusive=True
+        )
+
+        probe_idx = first_index_reach_threshold(
+            pro_th,
+            pro_mask,
+            ang,
+            inclusive=True
+        )
+
+        if ref_idx is None or probe_idx is None:
+            continue
+
+        vr = ref_xy[ref_idx] - ref_origin
+        vp = probe_xy[probe_idx] - probe_origin
+
+        nr = np.linalg.norm(vr)
+        np_ = np.linalg.norm(vp)
+
+        if nr < min_r or np_ < min_r:
+            continue
+
+        th_r = np.arctan2(vr[1], vr[0])
+        th_p = np.arctan2(vp[1], vp[0])
+
+        dtheta = (th_p - th_r + np.pi) % (2*np.pi) - np.pi
+        scale = np_ / nr
+
+        dtheta_list.append(dtheta)
+        scale_list.append(scale)
+        angle_used.append(np.rad2deg(ang))
+
+        if weights is not None:
+            weight_list.append(weights[i])
+
+    if len(dtheta_list) == 0:
+        raise ValueError("No valid angle anchors found")
+
+    dtheta_arr = np.asarray(dtheta_list)
+    scale_arr = np.asarray(scale_list)
+
+    # 3) Averaging
+    if weights is None:
+        dtheta_mean = float(np.mean(dtheta_arr))
+        scale_mean = float(np.mean(scale_arr))
+    else:
+        w = np.asarray(weight_list, dtype=np.float64)
+        w = w / (np.sum(w) + 1e-8)
+        dtheta_mean = float(np.sum(w * dtheta_arr))
+        scale_mean = float(np.sum(w * scale_arr))
+
+    debug = dict(
+        angles_deg=angle_used,
+        dtheta_list=dtheta_arr,
+        scale_list=scale_arr,
+    )
+
+    return dtheta_mean, scale_mean, debug
