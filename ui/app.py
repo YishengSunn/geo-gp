@@ -12,10 +12,14 @@ from config.runtime import (
     SELECT_HORIZON
 )
 from geometry.angles import (
-    angle_diff_mod_pi, build_relative_angles, last_window_rel_angles, crossed_multi_in_angle_rel,
+    angle_diff_mod_pi, build_relative_angles, last_window_rel_angles, crossed_multi_in_angle_rel
 )
+from geometry.angles import angles_relative_to_start_tangent
 from geometry.resample import resample_polyline_equal_dt
-from geometry.transforms import align_and_scale_gp_prediction
+from geometry.transforms import (
+    align_and_scale_gp_prediction, 
+    estimate_rigid_transform_2d, estimate_dtheta_scale_by_multi_angles
+)
 from gp.dataset import build_dataset, time_split
 from gp.model import train_gp, gp_predict, rollout_reference
 from matching.align import plot_vectors_at_angle_ref_probe
@@ -57,7 +61,7 @@ class DrawGPApp:
 
         # ---- Anchors / states ----
         self.anchors = []                # List of anchor points
-        self.anchor_step = 50            # Steps between anchors
+        self.anchor_step = 10            # Steps between anchors
         self.anchor_markers = []         # Anchor marker artists
         self.show_anchors = False        # Whether to show anchor markers
         self.current_anchor_ptr = 0      # Pointer to current anchor
@@ -281,7 +285,7 @@ class DrawGPApp:
         input_type, output_type = METHOD_CONFIGS[METHOD_ID]
         start_t = int(self.seed_end)
         h = self.sampled.shape[0] - (start_t + 1)
-        preds, gt, h_used = rollout_reference(self.model_info, self.sampled, start_t, h, K_HIST, input_type, output_type)
+        preds, gt, h_used, _ = rollout_reference(self.model_info, self.sampled, start_t, h, K_HIST, input_type, output_type)
 
         preds_np = preds.numpy() if preds.numel() > 0 else np.zeros((0, 2), dtype=np.float32)
         gt_np = gt.numpy() if gt.numel() > 0 else np.zeros((0, 2), dtype=np.float32)
@@ -470,7 +474,6 @@ class DrawGPApp:
         - probe-based: directly use the probe's seed rollout, independent of the reference trajectory
         """
         print("Matching and scaling prediction started...")
-        print()
 
         if self.best_ref is None:
             print("Please train first (T)!")
@@ -560,7 +563,17 @@ class DrawGPApp:
             probe_already_sampled (bool): If True, skip the resampling step.
         """
         print("Probe drawing completed, processing probe trajectory...")
-        print()
+
+        # Clear any probe-crossing state that may have been accumulated on raw mouse points
+        if hasattr(self, "refs"):
+            for ref in self.refs:
+                ref["current_anchor_ptr"] = 0
+                ref["probe_crossed_set"] = set()
+                ref["lookahead_buffer"] = None
+                ref["reached_goal"] = False
+                for a in ref.get("anchors", []):
+                    a.pop("probe_idx", None)
+                    a.pop("t_probe", None)
 
         # Right button release: end probe drawing
         if self.drawing_right:
@@ -575,13 +588,15 @@ class DrawGPApp:
 
             if self.smooth_enabled:
                 probe_eq = moving_average_centered(probe_eq, win=self.smooth_win)
-                self.update_probe_line()
 
             # Fallback: keep at least two points
             if probe_eq.shape[0] >= 2:
                 print(f"Probe resampled with equal time intervals: {len(probe_raw)} → {len(probe_eq)} points")
                 self.probe_pts = probe_eq.tolist()
                 self.update_probe_line()
+
+            # Update internal probe anchor crossing states after resampling
+            self.probe_check_cross_anchors_resampled()
         else:
             print("Probe has insufficient points for resampling/matching!")
             # Continue anyway to let subsequent logic provide clearer errors/prompts
@@ -593,15 +608,12 @@ class DrawGPApp:
             best_idx, best_pack, best_mse = choose_best_ref_by_mse(
                 self.refs, probe_eq_np, probe_raw_np, horizon=SELECT_HORIZON, align_on_anchor=False
             )
-            print(f"Reference trajectory selection results: best_idx={best_idx}, best_mse={best_mse:.6f}")
             if best_idx is not None:
                 self.best_ref = self.refs[best_idx]
                 out, dtheta, scale = best_pack
                 self.anchor = out
                 self.dtheta_manual = dtheta
                 self.scale_manual  = scale
-                print(f"Best reference #{best_idx} | MSE@{SELECT_HORIZON}={best_mse:.6f} | "
-                      f"Δθ={np.degrees(dtheta):.1f}° | s={scale:.3f}")
 
                 # Map original anchor points to "resampled indices" for other visualizations
                 ref_resampled   = self.best_ref["sampled"].detach().cpu().numpy()
@@ -615,36 +627,80 @@ class DrawGPApp:
             self.best_ref = None
             print("No trained reference trajectories available (refs is empty)!")
 
-        # 3) Visualization: angle change comparison + reference/target vectors
+        # 3) Estimate Δθ (rotation) and scale between reference and probe
         try:
+            # Prepare reference and probe trajectories (both already resampled)
             if self.best_ref is not None and len(self.probe_pts) > 1:
                 ref_np = self.best_ref['sampled'].detach().cpu().numpy()
-                probe_np = np.asarray(self.probe_pts, dtype=np.float64)  # Already resampled probe
-
-                # Angle change comparison (relative to start tangent)
-                # plot_angle_changes(ref_np, probe_np, k_hist=K_HIST)
-
-                # Target angle vector visualization (example uses 1 rad, can be connected to UI as needed)
-                # angle_target = 0.5 
-                angle_target = ANCHOR_ANGLE
-                out = plot_vectors_at_angle_ref_probe(
-                    ref_np, probe_np,
-                    angle_target=angle_target,
-                    k_hist=K_HIST,
-                    n_segments_base=10
-                )
-                self.seed_end = out['ref_index']
-                self.probe_end = out['probe_index']
-                v_ref = out['ref_vector']
-                v_pro = out['probe_vector']
-
-                self.dtheta_manual = float(np.arctan2(v_pro[1], v_pro[0]) - np.arctan2(v_ref[1], v_ref[0]))
-                self.scale_manual = float(np.linalg.norm(v_pro) / max(np.linalg.norm(v_ref), 1e-6))
-                print(f"Target vector comparison: Δθ={np.degrees(self.dtheta_manual):.1f}°, scale={self.scale_manual:.3f}")
+                probe_np = np.asarray(self.probe_pts, dtype=np.float64)
             else:
-                print("Insufficient reference or probe points to plot angle/vector comparison!")
+                ref_np = probe_np = None
+
+            # Collect matched anchor point pairs (ref ↔ probe)
+            ref_anchors = self.best_ref.get('anchors', []) if self.best_ref else []
+
+            ref_anchor_pts   = []
+            probe_anchor_pts = []
+
+            for a in ref_anchors:
+                if 'probe_idx' in a:
+                    ref_anchor_pts.append(ref_np[a['idx']])
+                    probe_anchor_pts.append(probe_np[a['probe_idx']])
+
+            # Case A: Multi-anchor rigid transform (preferred)
+            if len(ref_anchor_pts) >= 2:
+                self.dtheta_manual, self.scale_manual, _ = estimate_dtheta_scale_by_multi_angles(
+                    ref_np,
+                    probe_np
+                )
+                # self.dtheta_manual, self.scale_manual = estimate_rigid_transform_2d(
+                #     ref_anchor_pts,
+                #     probe_anchor_pts,
+                #     mode="least_squares"  # Or "median"
+                # )
+                print(
+                    f"[Multi-anchor] Δθ={np.degrees(self.dtheta_manual):.2f}°, "
+                    f"scale={self.scale_manual:.3f} "
+                    f"(anchors={len(ref_anchor_pts)})"
+                )
+                print()
+
+            # Case B: Fallback – single-anchor / angle-based estimation
+            else:
+                print("Insufficient matched anchors → fallback to angle-based estimation")
+
+                if self.best_ref is not None and len(self.probe_pts) > 1:
+                    # Angle change comparison visualization (relative to start tangent)
+                    # plot_angle_changes(ref_np, probe_np, k_hist=K_HIST)
+
+                    # angle_target = 0.5 
+                    angle_target = ANCHOR_ANGLE
+
+                    out = plot_vectors_at_angle_ref_probe(
+                        ref_np,
+                        probe_np,
+                        angle_target=angle_target,
+                        k_hist=K_HIST,
+                        n_segments_base=10
+                    )
+
+                    self.seed_end  = out['ref_index']
+                    self.probe_end = out['probe_index']
+                    v_ref = out['ref_vector']
+                    v_pro = out['probe_vector']
+
+                    self.dtheta_manual = float(np.arctan2(v_pro[1], v_pro[0]) - np.arctan2(v_ref[1], v_ref[0]))
+                    self.scale_manual = float(np.linalg.norm(v_pro) / max(np.linalg.norm(v_ref), 1e-6))
+
+                    print(
+                        f"[Single-anchor] Δθ={np.degrees(self.dtheta_manual):.1f}°, "
+                        f"scale={self.scale_manual:.3f}"
+                    )
+                else:
+                    print("Insufficient reference/probe data for angle-based estimation")
+
         except Exception as e:
-            print(f"Visualization exception: {e}!")
+            print(f"Δθ/scale estimation failed: {e}!")
             traceback.print_exc()
         
         # 4) Perform matching and scaling prediction (ref-based / probe-based decided internally)
@@ -1004,6 +1060,58 @@ class DrawGPApp:
                 changed_refs += 1
 
         return changed_refs
+    
+    def probe_check_cross_anchors_resampled(self):
+        """
+        Detect anchor crossings using resampled probe trajectory.
+        All probe_idx refer to resampled probe indices.
+        """
+        probe_np = np.asarray(self.probe_pts, dtype=np.float64)
+
+        if probe_np.shape[0] < 2 or not getattr(self, "refs", None):
+            return
+
+        th_seq, mask = angles_relative_to_start_tangent(probe_np, k_hist=K_HIST, min_r=1e-6)
+        if th_seq is None:
+            return
+
+        for ref_idx, ref in enumerate(self.refs):
+            anchors = ref.get('anchors', [])
+            if not anchors:
+                continue
+
+            ptr = int(ref.get('current_anchor_ptr', 0))
+            j_start = 1  # Probe index to start searching from
+
+            while ptr < len(anchors) and j_start < len(th_seq):
+                target_angle = float(anchors[ptr]['angle'])
+                found = False
+
+                for i in range(ptr, len(anchors)):
+                    a = anchors[i]
+                    target_angle = a['angle']
+
+                    for j in range(j_start, len(th_seq)):
+                        if not mask[j-1] or not mask[j]:
+                            continue
+
+                        crossed, _ = crossed_multi_in_angle_rel(th_seq[j-1], th_seq[j], [target_angle])
+
+                        if crossed:
+                            anchors[ptr]['probe_idx'] = j  # Resampled probe index
+                            ref.setdefault('probe_crossed_set', set()).add(ptr)
+                            ref['current_anchor_ptr'] = ptr + 1
+                            print(f"[AnchorCross][Resampled] Ref {ref_idx}: crossed A{ptr} at probe_idx={j} → advance ptr to {ptr + 1}")
+
+                            ptr += 1
+                            j_start = j + 1
+                            found = True
+                            break
+
+                if not found:
+                    break
+            
+            print()
 
     # ============================================================
     # Visualization Update Functions
