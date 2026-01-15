@@ -89,13 +89,14 @@ def choose_best_ref_by_mse(
             B = probe_eq_np[:n_overlap]
 
         mse = float(np.mean(np.sum((A - B) ** 2, axis=1)))
-        print(f"[MSE] Ref#{ridx}: {mse:.6f}")
 
         if mse < best_mse:
             best_mse  = mse
             best_idx  = ridx
             best_pack = (out, dtheta, scale)
 
-    print(f"MSE-based selection completed: best_idx={best_idx}, best_mse={best_mse:.6f}")
+    print(f"MSE-based selection completed: best_idx={best_idx}, best_mse={best_mse:.6f}, "
+          f"Δθ={np.degrees(best_pack[1]) if best_pack else None:.2f}°, scale={best_pack[2] if best_pack else None:.3f}")
+    print()
 
     return best_idx, best_pack, best_mse
