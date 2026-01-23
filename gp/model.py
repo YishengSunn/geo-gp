@@ -215,7 +215,7 @@ def rollout_reference_3d(
     assert start_t >= k, f"start_t={start_t} must be >= {k}"
 
     T = traj.shape[0]
-    h = max(0, min(h, T - start_t - 1))
+    h = max(0, h)
 
     deltas = traj[1:] - traj[:-1]  # (T-1, 3)
     global_origin = traj[0]
