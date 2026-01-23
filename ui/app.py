@@ -443,8 +443,8 @@ class DrawGPApp:
         if self.smooth_enabled and len(self.pred_scaled) >= 2:
             pred_raw_arr = np.asarray(self.pred_scaled, dtype=np.float64)
             pred_smooth = smooth_prediction_by_velocity(
-                probe_xy=probe_np,
-                pred_xy=pred_raw_arr,
+                probe=probe_np,
+                pred=pred_raw_arr,
                 win=self.smooth_win,
                 blend_first_step=self.smooth_blend_first,
             )
