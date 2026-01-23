@@ -119,8 +119,8 @@ def moving_average_centered(arr, win):
     return out
 
 def smooth_prediction_by_velocity(
-    probe_xy: np.ndarray,
-    pred_xy: np.ndarray,
+    probe: np.ndarray,
+    pred: np.ndarray,
     *,
     win: int = 9,
     blend_first_step: float = 0.8,
@@ -132,42 +132,42 @@ def smooth_prediction_by_velocity(
     first velocity to preserve the probe's exiting direction.
 
     Args:
-        probe_xy: (Np, 2) probe points in world/probe frame
-        pred_xy: (Hp, 2) predicted points in world/probe frame (future, starting AFTER probe end)
+        probe_xy: (Np, D) probe points in world/probe frame
+        pred_xy: (Hp, D) predicted points in world/probe frame (future, starting AFTER probe end)
         win: centered moving-average window (odd preferred)
         blend_first_step: blend factor for the first predicted delta:
             v0_smooth = blend_first_step * v0_probe + (1-blend_first_step) * v0_pred
 
     Returns:
-        pred_xy_smooth: (Hp, 2) smoothed predicted points in world/probe frame
+        pred_xy_smooth: (Hp, D) smoothed predicted points in world/probe frame
     """
-    probe_xy = np.asarray(probe_xy, dtype=np.float64)
-    pred_xy = np.asarray(pred_xy, dtype=np.float64)
+    probe = np.asarray(probe, dtype=np.float64)
+    pred = np.asarray(pred, dtype=np.float64)
 
-    if pred_xy.size == 0:
-        return pred_xy
-    if probe_xy.shape[0] < 2:
-        return pred_xy
+    if pred.size == 0:
+        return pred
+    if probe.shape[0] < 2:
+        return pred
 
     # Build a full polyline that includes the last probe point as the boundary
-    p_last = probe_xy[-1]
-    full = np.vstack([p_last[None, :], pred_xy])  # (Hp+1, 2)
+    p_last = probe[-1]
+    full = np.vstack([p_last[None, :], pred])  # (Hp+1, D)
 
     # Velocity sequence for the predicted part
-    v = np.diff(full, axis=0)  # (Hp, 2)
+    v = np.diff(full, axis=0)  # (Hp, D)
 
     # Smooth velocities using a centered moving average
     v_s = moving_average_centered(v, int(win))
 
     # Enforce a smooth connection direction using the probe's last delta
-    v0_probe = probe_xy[-1] - probe_xy[-2]
+    v0_probe = probe[-1] - probe[-2]
     if np.linalg.norm(v0_probe) > 1e-12:
         v_s[0] = float(blend_first_step) * v0_probe + (1.0 - float(blend_first_step)) * v_s[0]
 
     # Reconstruct smoothed prediction points
-    out = np.empty_like(pred_xy, dtype=np.float64)
+    out = np.empty_like(pred, dtype=np.float64)
     cur = p_last.copy()
-    for i in range(pred_xy.shape[0]):
+    for i in range(pred.shape[0]):
         cur = cur + v_s[i]
         out[i] = cur
 
