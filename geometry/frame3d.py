@@ -64,6 +64,67 @@ def estimate_rotation_scale_3d(ref_pts, probe_pts, eps=1e-12):
 
     return R, s, t
 
+def estimate_rotation_scale_3d_no_svd(ref_pts, probe_pts, m=30):
+    """
+    Estimate similarity transform (rotation R, isotropic scale s, translation t)
+    that best aligns ref_pts -> probe_pts in least-squares sense,
+    using a tangent + normal alignment method without SVD.
+
+    Args:
+        ref_pts: array-like (N, 3)
+        probe_pts: array-like (N, 3)
+        m: number of points to use from start of each trajectory
+    
+    Returns:
+        R: (3, 3) np.ndarray, rotation matrix
+        s: float, isotropic scale
+        t: (3,) np.ndarray, translation
+    """
+    ref = ref_pts[:m]
+    probe = probe_pts[:m]
+
+    def tangents(P):
+        V = P[1:] - P[:-1]
+        V /= (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
+        return V
+
+    T_ref = tangents(ref)
+    T_probe = tangents(probe)
+
+    t_ref = T_ref.mean(axis=0)
+    t_probe = T_probe.mean(axis=0)
+    t_ref /= np.linalg.norm(t_ref)
+    t_probe /= np.linalg.norm(t_probe)
+
+    def rot_a_to_b(a, b):
+        v = np.cross(a, b)
+        c = np.dot(a, b)
+        s = np.linalg.norm(v)
+        if s < 1e-8:
+            return np.eye(3)
+        vx = np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])
+        return np.eye(3) + vx + vx @ vx * ((1-c)/(s*s))
+
+    R1 = rot_a_to_b(t_ref, t_probe)
+
+    # Roll alignment
+    n_ref = np.cross(T_ref[0], T_ref[-1])
+    n_probe = np.cross(T_probe[0], T_probe[-1])
+    n_ref /= np.linalg.norm(n_ref)
+    n_probe /= np.linalg.norm(n_probe)
+
+    R2 = rot_a_to_b(n_ref @ R1.T, n_probe)
+
+    R = R2 @ R1
+
+    step_ref = np.linalg.norm(ref[1:] - ref[:-1], axis=1).mean()
+    step_probe = np.linalg.norm(probe[1:] - probe[:-1], axis=1).mean()
+    s = step_probe / step_ref
+
+    t = probe_pts[0] - s * (ref_pts[0] @ R.T)
+
+    return R, s, t
+
 def frame_from_window_transport(pts_hist_np, up=(0,0,1), eps=1e-12):
     """
     Build local frame from history points using parallel transport.
