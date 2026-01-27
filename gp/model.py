@@ -5,11 +5,6 @@ from config.runtime import (
     METHOD_ID, METHOD_HPARAM, 
     MAX_EXPERTS, MAX_DATA_PER_EXPERT, MIN_POINTS_OFFLINE, NEAREST_K, WINDOW_SIZE
 )
-from geometry.frame3d import (
-    frame_from_window_transport, 
-    local_frame_3d_from_points, 
-    rotate_world_to_local_3d
-)
 from geometry.transforms import (
     rotate_to_fixed_frame, 
     polar_feat_from_xy_torch, 
@@ -284,73 +279,3 @@ def rollout_reference_3d(
     gt = traj[start_t + 1 : start_t + 1 + h]
 
     return preds, gt, h, np.array(vars_seq)
-
-def rollout_reference_3d_local(
-    model_info,
-    traj,
-    start_t,
-    h,
-    k,
-    up=(0.0, 0.0, 1.0)
-):
-    """
-    3D rollout trajectory using GP model with local frame + local delta.
-
-    Args:
-        model_info: dict with 'gp_model' and 'scaler'
-        traj: torch.Tensor of shape (T, 3)
-        start_t: int, starting time index (position index)
-        h: int, rollout horizon (number of future steps)
-        k: int, history length (number of past deltas)
-        up: tuple, reference up vector for local frame
-    
-    Returns:
-        preds: torch.Tensor of shape (h, 3)   # Predicted positions
-        gt: torch.Tensor of shape (h, 3)      # Ground truth positions
-        h: int
-        vars_seq: numpy array of shape (h,)
-    """
-    assert start_t >= k, f"At least {k+1} history points are required, but got start_t={start_t}"
-    traj = traj.detach().cpu()
-
-    hist_pos = [traj[start_t - k + i].clone() for i in range(k + 1)]
-    cur_pos = hist_pos[-1].clone()
-
-    hist_del_world = [hist_pos[i+1] - hist_pos[i] for i in range(k)]
-
-    preds = []
-    vars_seq = []
-
-    for i in range(h):
-        pts_hist = torch.stack(hist_pos).numpy()
-
-        R, _ = frame_from_window_transport(pts_hist, up=up)
-
-        deltas_local = []
-        for dp in hist_del_world:
-            deltas_local.append(rotate_world_to_local_3d(dp.numpy(), R))
-
-        x = torch.tensor(np.concatenate(deltas_local)[None, :], dtype=torch.float32)
-
-        y_pred, var = gp_predict(model_info, x)
-        dp_local_next = y_pred[0]
-
-        dp_world_next = torch.tensor(dp_local_next @ R.T, dtype=torch.float32)
-
-        next_pos = cur_pos + dp_world_next
-
-        preds.append(next_pos)
-        vars_seq.append(var)
-
-        hist_pos.append(next_pos)
-        hist_pos = hist_pos[-(k+1):]
-
-        hist_del_world.append(dp_world_next)
-        hist_del_world = hist_del_world[-k:]
-
-        cur_pos = next_pos
-
-    preds = torch.stack(preds)
-    gt = traj[start_t+1:start_t+1+len(preds)]
-
-    return preds, gt, len(preds), np.array(vars_seq)
