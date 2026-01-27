@@ -105,6 +105,45 @@ def resample_trajectory_3d_equal_dt(
 
     return np.asarray(out, dtype=np.float64)
 
+def resample_by_arclen_fraction(P: np.ndarray, M: int, eps: float = 1e-9) -> np.ndarray:
+    """
+    Resample polyline P (N,3) into M points uniformly in arclength fraction [0,1].
+
+    Args:
+        P: (N,3) array of 3D points
+        M: int, number of points to resample to
+        eps: float, numerical stability threshold
+
+    Returns:
+        out: (M,3) array of resampled 3D points
+    """
+    P = np.asarray(P, dtype=np.float64)
+    if P.shape[0] < 2:
+        return np.repeat(P[:1], M, axis=0)
+
+    seg = P[1:] - P[:-1]
+    seg_len = np.linalg.norm(seg, axis=1)
+    cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+    total = float(cum[-1])
+    if total < eps:
+        return np.repeat(P[:1], M, axis=0)
+
+    # Target cumulative lengths (uniform in fraction)
+    s_targets = np.linspace(0.0, total, M)
+
+    out = np.empty((M, 3), dtype=np.float64)
+    j = 0
+    for i, s in enumerate(s_targets):
+        while j < len(seg_len) - 1 and s > cum[j+1]:
+            j += 1
+        ds = s - cum[j]
+        if seg_len[j] < eps:
+            out[i] = P[j]
+        else:
+            r = ds / seg_len[j]
+            out[i] = P[j] + r * seg[j]
+    return out
+
 def resample_to_k(points_xy, k):
     """
     Resample polyline points to have exactly k points evenly spaced along the path.
