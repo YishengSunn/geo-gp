@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 from config.runtime import (
     TRAIN_RATIO, SAMPLE_HZ, DEFAULT_SPEED, K_HIST, METHOD_ID
 )
-from geometry.frame3d import estimate_rotation_scale_3d, estimate_rotation_scale_3d_no_svd
+from geometry.frame3d import estimate_rotation_scale_3d, estimate_rotation_scale_3d_search_by_count
 from geometry.resample import resample_trajectory_3d_equal_dt
 from gp.dataset import build_dataset_3d, time_split
 from gp.model import train_gp, rollout_reference_3d
 from ui.handlers3d import on_press, on_move, on_release, on_key
-from utils.misc import Standardizer, moving_average_centered, smooth_prediction_by_velocity
+from utils.misc import moving_average_centered, smooth_prediction_by_velocity
 
 
 class DrawApp3D:
@@ -136,7 +136,7 @@ class DrawApp3D:
         k=K_HIST,
         input_type="spherical",
         output_type="delta",
-        n_align=20,
+        n_align=10,
         start_t=None,
     ):
         # Cancel any running prediction
@@ -150,6 +150,7 @@ class DrawApp3D:
 
         # 1) Resample probe
         self.probe_eq = resample_trajectory_3d_equal_dt(self.probe_raw, sample_hz=SAMPLE_HZ, speed=DEFAULT_SPEED)
+        print(f"[Predict] Resampled probe_eq: {self.probe_eq.shape}")
         if len(self.probe_eq) < (k + 2):
             print(f"[Predict] Not enough probe points. Need >= {k+2}, got {len(self.probe_eq)}!")
             print()
@@ -171,9 +172,16 @@ class DrawApp3D:
             return
 
         # R, s, t = estimate_rotation_scale_3d(self.ref_eq[:na], self.probe_eq[:na])
-        R, s, t = estimate_rotation_scale_3d_no_svd(self.ref_eq[:na], self.probe_eq[:na])
+        R, s, t = estimate_rotation_scale_3d_search_by_count(
+            self.ref_eq,
+            self.probe_eq,
+            s_min=0.5,
+            s_max=2.0,
+            margin_pts=200,
+            step=1,
+        )[:3]
         self.R, self.s, self.t = R, s, t
-        print(f"[Predict] Alignment done. R=\n{R}, s={s:.4f}, t={t}")
+        # print(f"[Predict] Alignment done. R=\n{R}, s={s:.4f}, t={t}")
 
         # 3) Transform probe into ref frame
         probe_in_ref = ((self.probe_eq - t) / s) @ R
