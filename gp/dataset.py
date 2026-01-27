@@ -1,11 +1,6 @@
 import torch
 import numpy as np
 
-from geometry.frame3d import (
-    frame_from_window_transport, 
-    local_frame_3d_from_points, 
-    rotate_world_to_local_3d
-)
 from geometry.transforms import (
     rotate_to_fixed_frame, 
     polar_feat_from_xy_torch, 
@@ -139,54 +134,6 @@ def build_dataset_3d(traj, k, input_type='delta', output_type='delta'):
             raise ValueError(f"Unsupported output_type for 3D: {output_type}")
 
     return torch.stack(Xs), torch.stack(Ys)
-
-def build_dataset_3d_local_delta(traj, k, up=(0.0, 0.0, 1.0)):
-    """
-    Build 3D dataset using local frame + local delta.
-
-    Args:
-        traj: torch.Tensor of shape (T, 3)
-        k: history length (number of past deltas)
-        up: tuple, reference up vector for local frame
-
-    Returns:
-        Xs: torch.Tensor of shape (N, k*3)
-        Ys: torch.Tensor of shape (N, 3)
-    """
-    assert traj.ndim == 2 and traj.shape[1] == 3, f"Expected traj shape (T,3), got {traj.shape}"
-
-    traj_np = traj.detach().cpu().numpy()
-    T = traj_np.shape[0]
-
-    Xs, Ys = [], []
-
-    # We need at least k+2 points to produce one (X, Y)
-    for i in range(k, T - 1):
-        # Use points up to i to build frame
-        pts_hist = traj_np[i-k:i+1]
-
-        R, _ = frame_from_window_transport(pts_hist, up=up)
-
-        # Build input: past k local deltas
-        deltas_local = []
-        for j in range(i - k, i):
-            dp_world = traj_np[j+1] - traj_np[j]
-            dp_local = rotate_world_to_local_3d(dp_world, R)
-            deltas_local.append(dp_local)
-
-        X_i = np.concatenate(deltas_local, axis=0)
-
-        # Output: next local delta
-        dp_next_world = traj_np[i+1] - traj_np[i]
-        y_local = rotate_world_to_local_3d(dp_next_world, R)
-
-        Xs.append(X_i)
-        Ys.append(y_local)
-
-    Xs = torch.tensor(np.asarray(Xs), dtype=torch.float32)
-    Ys = torch.tensor(np.asarray(Ys), dtype=torch.float32)
-
-    return Xs, Ys
 
 def build_dataset_cartesian(traj, k):
     """
