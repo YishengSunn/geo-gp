@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 from config.runtime import (
     TRAIN_RATIO, SAMPLE_HZ, DEFAULT_SPEED, K_HIST, METHOD_ID
 )
-from geometry.frame3d import estimate_rotation_scale_3d, estimate_rotation_scale_3d_search_by_count
+from geometry.frame3d import estimate_rotation_scale_3d_search_by_count
+from geometry.metrics import geom_mse
 from geometry.resample import resample_trajectory_3d_equal_dt
 from gp.dataset import build_dataset_3d, time_split
 from gp.model import train_gp, rollout_reference_3d
@@ -171,14 +172,13 @@ class DrawApp3D:
             print()
             return
 
-        # R, s, t = estimate_rotation_scale_3d(self.ref_eq[:na], self.probe_eq[:na])
         R, s, t = estimate_rotation_scale_3d_search_by_count(
             self.ref_eq,
             self.probe_eq,
             s_min=0.5,
             s_max=2.0,
-            margin_pts=200,
-            step=1,
+            margin_pts=300,
+            step=10,
         )[:3]
         self.R, self.s, self.t = R, s, t
         # print(f"[Predict] Alignment done. R=\n{R}, s={s:.4f}, t={t}")
@@ -188,48 +188,98 @@ class DrawApp3D:
         self.probe_goal = self.s * (self.ref_eq[-1] @ self.R.T) + self.t
 
         # 4) Rollout in ref frame
-        self.preds = []
+        self.preds = None
 
-        cur_hist = probe_in_ref.copy()
-        rollout_horizon = self.rollout_horizon
+        mse_thresh = 0.05
+        drop_k = 5
+        max_retries = 5
 
-        for step in range(rollout_horizon):
-            if local_pred_id != self.prediction_id:
-                print("[Predict] Cancelled by new drawing.")
-                print()
-                return
-            
-            preds_ref, _, _, vars_ref = rollout_reference_3d(
-                self.model_info,
-                torch.tensor(cur_hist, dtype=torch.float32),
-                start_t=cur_hist.shape[0] - 1,
-                h=1,
-                k=k,
-                input_type=input_type,
-                output_type=output_type,
-            )
+        for attempt in range(max_retries):
+            cur_hist = probe_in_ref.copy()
+            preds_world = []
+            failed = False
 
-            next_ref = preds_ref[-1].numpy()
+            for step in range(self.rollout_horizon):
+                if local_pred_id != self.prediction_id:
+                    print("[Predict] Cancelled by new drawing.")
+                    print()
+                    return
+                
+                preds_ref, _, _, vars_ref = rollout_reference_3d(
+                    self.model_info,
+                    torch.tensor(cur_hist, dtype=torch.float32),
+                    start_t=cur_hist.shape[0] - 1,
+                    h=1,
+                    k=k,
+                    input_type=input_type,
+                    output_type=output_type,
+                )
 
-            # Ref -> Probe/world
-            next_world = self.s * (next_ref @ self.R.T) + self.t
-            self.preds.append(next_world)
+                next_ref = preds_ref[-1].numpy()
 
-            # Update every 5 steps
-            if step % 5 == 0:
-                self.update_pred_lines()
+                # Ref -> Probe/world
+                next_world = self.s * (next_ref @ self.R.T) + self.t
+                preds_world.append(next_world)
 
-            # Update history
-            cur_hist = np.vstack([cur_hist, next_ref])
+                # Update history
+                cur_hist = np.vstack([cur_hist, next_ref])
+ 
+                # Truncation Logic
+                if self.probe_goal is not None:
+                    d = np.linalg.norm(next_world - self.probe_goal)
+                    if d < self.goal_stop_eps and np.max(vars_ref) > 1e-3:
+                        print(f"[Predict] Reached goal at step {step}, d={d:.4f}")
+                        break
 
-            # Truncation Logic
-            if self.probe_goal is not None:
-                d = np.linalg.norm(next_world - self.probe_goal)
-                if d < self.goal_stop_eps and np.max(vars_ref) > 1e-3:
-                    print(f"Truncated at step {step}.")
+            # Geometric drift check
+            mse_full = geom_mse(cur_hist, self.ref_eq)
+            print(f"[GeomCheck] full mse = {mse_full:.4f}")
+
+            if mse_full > mse_thresh:
+                print("[Recover] Geometric drift detected, retry...")
+                failed = True
+
+            if not failed:
+                preds_world = np.asarray(preds_world)
+
+                # Robust start selection: enforce temporal consistency
+                probe_end = self.probe_eq[-1]
+                max_start_jump = 0.05
+
+                dists = np.linalg.norm(preds_world - probe_end, axis=1)
+                candidate_idxs = np.where(dists < max_start_jump)[0]
+                
+                if len(candidate_idxs) == 0:
+                    print(f"[Recover] No prediction point close enough to probe end, retry...")
+                    failed = True
+                else:
+                    # Choose the earliest such index to avoid skipping trajectory segments
+                    i_start = int(candidate_idxs[0])
+                    d_start = float(dists[i_start])
+                    print(f"[Recover] Using earliest matching index {i_start}, jump={d_start:.4f}")
+
+                    # Additional safety: ensure local continuity (no big velocity jump)
+                    if i_start > 0:
+                        step_jump = np.linalg.norm(preds_world[i_start] - preds_world[i_start - 1])
+                        if step_jump > 3.0 * np.mean(np.linalg.norm(np.diff(preds_world, axis=0), axis=1)):
+                            print("[Recover] Detected discontinuity before start point, retry...")
+                            failed = True
+                            continue
+
+                    self.preds = preds_world[i_start:]
                     break
 
-        self.preds = np.asarray(self.preds, dtype=np.float64)
+            # Drop tail of probe history and retry
+            if probe_in_ref.shape[0] <= (k + drop_k):
+                break
+
+            probe_in_ref = probe_in_ref[:-drop_k]
+            print(f"[Recover] Dropping last {drop_k} probe points, retry {attempt+1}")
+
+        if self.preds is None:
+            print("[Predict] All retries failed. No prediction output.")
+            print()
+            return
 
         # 5) Smooth prediction by velocity
         if self.smooth_enabled:
