@@ -5,6 +5,7 @@ from config.runtime import (
     METHOD_ID, METHOD_HPARAM, 
     MAX_EXPERTS, MAX_DATA_PER_EXPERT, MIN_POINTS_OFFLINE, NEAREST_K, WINDOW_SIZE
 )
+from geometry.so3 import so3_exp
 from geometry.transforms import (
     rotate_to_fixed_frame, 
     polar_feat_from_xy_torch, 
@@ -40,7 +41,7 @@ def train_gp(dataset, method_id=METHOD_ID):
         window_size=256, light_maxiter=60
     )
 
-    print(f"Dataset Shape: Xn={Xn.shape}, Yn={Yn.shape}")
+    print(f"[Train] Dataset Shape: Xn={Xn.shape}, Yn={Yn.shape}")
     for i in range(Xn.shape[0]):
         gp_model.add_point(Xn[i], Yn[i])
     
@@ -112,7 +113,7 @@ def rollout_reference(model_info, traj, start_t, h, k, input_type, output_type, 
         dirs = traj[1:end_idx+1] - traj[0]
         global_base_dir = dirs.mean(dim=0)
     else:
-        print("Insufficient trajectory points to compute global direction, using default direction!")
+        print("[Predict] Insufficient trajectory points to compute global direction, using default direction!")
         global_base_dir = torch.tensor([1.0, 0.0])
 
     # Initialize historical positions and deltas
@@ -245,8 +246,8 @@ def rollout_reference_3d(
             x = torch.cat([sph.reshape(-1), hist_del.reshape(-1)], dim=0).reshape(1, -1)
 
         elif input_type == 'dir':
-            dir_feat = direction_feat_from_xyz_torch(hist_pos, global_origin).reshape(1, -1)
-            x = dir_feat
+            dir_feat = direction_feat_from_xyz_torch(hist_pos, global_origin)
+            x = dir_feat.reshape(1, -1)
 
         else:
             raise ValueError(f"Unsupported input_type: {input_type}")
@@ -276,6 +277,120 @@ def rollout_reference_3d(
         cur_pos = next_pos
 
     preds = torch.stack(preds_pos, dim=0)
-    gt = traj[start_t + 1 : start_t + 1 + h]
+    gt = traj[start_t+1:start_t+1+h]
 
     return preds, gt, h, np.array(vars_seq)
+
+def rollout_reference_6d(
+    model_info,
+    traj_pos,
+    traj_rot,
+    start_t,
+    h,
+    k,
+    input_type='spherical',
+    output_type='delta',
+):
+    """
+    6D rollout trajectory (position + orientation) using GP model from a given start time for h steps.
+
+    Args:
+        model_info: dict with 'gp_model' and 'scaler'
+        traj_pos: torch tensor of shape (T, 3), positions
+        traj_rot: torch tensor of shape (T, 3, 3), orientations (rotation matrices)
+        start_t: int, starting time index (position index)
+        h: int, rollout horizon (number of future steps)
+        k: int, history length (number of past deltas)
+        input_type: 'delta', 'pos', 'pos+delta', 'spherical', or 'spherical+delta'
+        output_type: 'delta' or 'absolute'
+
+    Returns:
+        preds_pos: torch tensor of shape (h, 3), predicted positions
+        preds_rot: torch tensor of shape (h, 3, 3), predicted orientations
+        gt_pos: torch tensor of shape (h, 3), ground truth positions
+        gt_rot: torch tensor of shape (h, 3, 3), ground truth orientations
+        vars_seq: numpy array of shape (h,), variance at each step
+    """
+    assert traj_pos.ndim == 2 and traj_pos.shape[1] == 3, f"Expected traj_pos shape (T,3), got {traj_pos.shape}!"
+    assert traj_rot.ndim == 3 and traj_rot.shape[1:] == (3, 3), f"Expected traj_rot shape (T,3,3), got {traj_rot.shape}!"
+    assert start_t >= k, f"start_t={start_t} must be >= {k}!"
+
+    global_origin = traj_pos[0]
+
+    cur_pos = traj_pos[start_t].clone()
+    cur_R = traj_rot[start_t].clone()
+
+    hist_pos = traj_pos[start_t-k+1:start_t+1].clone()
+    hist_del = (traj_pos[1:] - traj_pos[:-1])[start_t-k:start_t].clone()
+
+    preds_pos = []
+    preds_rot = []
+    vars_seq = []
+
+    for _ in range(h):
+        # Build input x_pos
+        if input_type == 'delta':
+            x_pos = hist_del.reshape(1, -1)
+
+        elif input_type == 'pos':
+            x_pos = hist_pos.reshape(1, -1)
+
+        elif input_type == 'pos+delta':
+            x_pos = torch.cat([hist_pos.reshape(-1), hist_del.reshape(-1)], dim=0).reshape(1, -1)
+
+        elif input_type == 'spherical':
+            sph = spherical_feat_from_xyz_torch(hist_pos, global_origin)
+            x_pos = sph.reshape(1, -1)
+
+        elif input_type == 'spherical+delta':
+            sph = spherical_feat_from_xyz_torch(hist_pos, global_origin)
+            x_pos = torch.cat([sph.reshape(-1), hist_del.reshape(-1)], dim=0).reshape(1, -1)
+        
+        elif input_type == 'dir':
+            dir_feat = direction_feat_from_xyz_torch(hist_pos, global_origin)
+            x_pos = dir_feat.reshape(1, -1)
+
+        else:
+            raise ValueError(f"Unsupported input_type: {input_type}")
+
+        # GP prediction (6D output)
+        y_pred, var = gp_predict(model_info, x_pos)
+        y_pred = torch.tensor(y_pred, dtype=torch.float32)[0]
+        vars_seq.append(var)
+
+        if output_type == 'delta':
+            delta_world = y_pred[:3]
+            omega_b = y_pred[3:]
+
+            next_pos = cur_pos + delta_world
+
+            R_delta = so3_exp(omega_b)
+            next_R = cur_R @ R_delta
+
+        elif output_type == 'absolute':
+            next_pos = y_pred[:3]
+            next_R = y_pred[3:].reshape(3, 3)
+
+            delta_world = next_pos - cur_pos
+
+        else:
+            raise ValueError(f"Unsupported output_type: {output_type}")
+        
+        # Save prediction
+        preds_pos.append(next_pos)
+        preds_rot.append(next_R)
+
+        # Update history
+        hist_pos = torch.cat([hist_pos[1:], next_pos.unsqueeze(0)], dim=0)
+        hist_del = torch.cat([hist_del[1:], delta_world.unsqueeze(0)], dim=0)
+
+        cur_pos = next_pos
+        cur_R = next_R
+
+    preds_pos = torch.stack(preds_pos, dim=0)
+    preds_rot = torch.stack(preds_rot, dim=0)
+
+    gt_pos = traj_pos[start_t+1:start_t+1+h]
+    gt_rot = traj_rot[start_t+1:start_t+1+h]
+
+    return preds_pos, preds_rot, gt_pos, gt_rot, np.array(vars_seq)
