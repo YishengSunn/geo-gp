@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 
+from geometry.so3 import so3_log
 from geometry.transforms import (
     rotate_to_fixed_frame, 
     polar_feat_from_xy_torch, 
@@ -132,6 +133,92 @@ def build_dataset_3d(traj, k, input_type='delta', output_type='delta'):
             Ys.append(traj[i+1])
         else:
             raise ValueError(f"Unsupported output_type for 3D: {output_type}")
+
+    return torch.stack(Xs), torch.stack(Ys)
+
+def build_dataset_6d(traj_pos: torch.Tensor,
+                     traj_rot: torch.Tensor,
+                     k: int,
+                     input_type: str = 'spherical',
+                     output_type: str = 'twist'):
+    """
+    Build 6D dataset from trajectory with specified input and output types.
+
+    Args:
+        traj_pos: torch tensor of shape (T, 3)
+        traj_rot: torch tensor of shape (T, 3, 3)
+        k: history length
+        input_type: str, input feature type ('pos', 'delta', 'pos+delta', 'spherical', 'spherical+delta', 'dir')
+        output_type: str, output type ('delta' or 'absolute')
+
+    Returns:
+        Xs: torch tensor of shape (N, D_in)
+        Ys: torch tensor of shape (N, 6)
+    """
+    assert traj_pos.shape[0] == traj_rot.shape[0], "[Dataset] Position and rotation trajectories must have the same length!"
+    T = traj_pos.shape[0]
+
+    global_origin = traj_pos[0]
+    deltas = traj_pos[1:] - traj_pos[:-1]
+
+    Xs, Ys = [], []
+
+    for i in range(k, T - 1):
+        # Input features
+        if input_type == 'pos':
+            pos_hist = traj_pos[i-k+1:i+1]
+            Xs.append(pos_hist.reshape(-1))
+
+        elif input_type == 'delta':
+            delta_hist = deltas[i-k:i]
+            Xs.append(delta_hist.reshape(-1))
+
+        elif input_type == 'pos+delta':
+            pos_hist = traj_pos[i-k+1:i+1]
+            delta_hist = deltas[i-k:i]
+            Xs.append(torch.cat([pos_hist.reshape(-1), delta_hist.reshape(-1)]))
+
+        elif input_type == 'spherical':
+            pos_hist = traj_pos[i-k+1:i+1]
+            sph = spherical_feat_from_xyz_torch(pos_hist, global_origin)
+            Xs.append(sph.reshape(-1))
+
+        elif input_type == 'spherical+delta':
+            pos_hist = traj_pos[i-k+1:i+1]
+            delta_hist = deltas[i-k:i]
+            sph = spherical_feat_from_xyz_torch(pos_hist, global_origin)
+            Xs.append(torch.cat([sph.reshape(-1), delta_hist.reshape(-1)]))
+
+        elif input_type == 'dir':
+            pos_hist = traj_pos[i-k+1:i+1]
+            dir_feat = direction_feat_from_xyz_torch(pos_hist, global_origin).reshape(-1)
+            Xs.append(dir_feat)
+
+        else:
+            raise ValueError(f"Unsupported input_type for 6D: {input_type}")
+
+        # Output features
+        if output_type == 'delta':
+            R_t = traj_rot[i]
+            R_next = traj_rot[i+1]
+
+            # Angular velocity in body frame
+            dR = R_t.T @ R_next
+            omega_b = so3_log(dR)
+
+            Ys.append(torch.cat([deltas[i], omega_b], dim=0))
+
+            # # Linear velocity in body frame
+            # dp = traj_pos[i+1] - traj_pos[i]
+            # v_b = R_t.T @ dp
+
+            # Ys.append(torch.cat([v_b, omega_b], dim=0))
+
+        elif output_type == 'absolute':
+            Ys.append(torch.cat([traj_pos[i+1], traj_rot[i+1].reshape(-1)], dim=0))
+
+        else:
+            raise ValueError(f"Unsupported output_type for 6D: {output_type}")
 
     return torch.stack(Xs), torch.stack(Ys)
 
