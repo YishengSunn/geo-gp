@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def on_press(app3d, event):
+def on_press(app6d, event):
     """
     Handle mouse press events for drawing.
     """
@@ -9,104 +9,129 @@ def on_press(app3d, event):
         return
 
     # Left mouse on XY -> reference
-    if event.button == 1 and event.inaxes == app3d.ax_xy:
-        app3d.drawing_ref = True
-        app3d.ref_raw = []
-        app3d.ref_raw.append(xy_to_xyz(app3d, event))
-        app3d.update_ref_lines()
+    if event.button == 1 and event.inaxes == app6d.ax_xy:
+        app6d.drawing_ref = True
+        app6d.ref_legend.set_color("tab:red")
+        app6d.line_ref_xy.set_color("tab:red")
+        app6d.line_ref_3d.set_color("tab:red")
+        app6d.ref_raw = []
+        app6d.ref_raw.append(xy_to_xyz(app6d, event))
+        app6d.update_ref_lines()
         print("[UI] Start drawing reference (XY)...")
 
     # Right mouse on YZ -> probe
-    if event.button == 3 and event.inaxes == app3d.ax_yz:
-        app3d.prediction_id += 1
-        app3d.drawing_probe = True
-        app3d.probe_raw = []
-        app3d.preds = None
-        app3d.gt = None
-        app3d.probe_raw.append(yz_to_xyz(app3d, event))
-        app3d.update_probe_lines()
-        app3d.update_pred_lines()
+    if event.button == 3 and event.inaxes == app6d.ax_yz:
+        app6d.prediction_id += 1
+        app6d.drawing_probe = True
+        app6d.probe_raw = []
+        app6d.preds = None
+        app6d.gt = None
+        app6d.probe_raw.append(yz_to_xyz(app6d, event))
+        app6d.update_probe_lines()
+        app6d.update_pred_lines()
         print("[UI] Start drawing probe (YZ).")
 
-def on_move(app3d, event):
+def on_move(app6d, event):
     """
     Handle mouse move events for drawing.
     """
     if event.inaxes is None or event.xdata is None or event.ydata is None:
         return
 
-    if app3d.drawing_ref and event.inaxes == app3d.ax_xy:
-        app3d.ref_raw.append(xy_to_xyz(app3d, event))
-        app3d.update_ref_lines()
+    if app6d.drawing_ref and event.inaxes == app6d.ax_xy:
+        app6d.ref_raw.append(xy_to_xyz(app6d, event))
+        app6d.update_ref_lines()
 
-    if app3d.drawing_probe and event.inaxes == app3d.ax_yz:
-        app3d.probe_raw.append(yz_to_xyz(app3d, event))
-        app3d.update_probe_lines()
+    if app6d.drawing_probe and event.inaxes == app6d.ax_yz:
+        app6d.probe_raw.append(yz_to_xyz(app6d, event))
+        app6d.update_probe_lines()
 
-def on_release(app3d, event):
+def on_release(app6d, event):
     """
     Handle mouse release events to finish drawing.
     """
     # Finish reference
-    if event.button == 1 and app3d.drawing_ref:
-        app3d.drawing_ref = False
-        print(f"[UI] Reference finished. pts={len(app3d.ref_raw)}")
+    if event.button == 1 and app6d.drawing_ref:
+        app6d.drawing_ref = False
+        print(f"[UI] Reference finished. pts={len(app6d.ref_raw)}")
         print()
         return
 
     # Finish probe -> resample & predict automatically
-    if event.button == 3 and app3d.drawing_probe:
-        app3d.drawing_probe = False
-        print(f"[UI] Probe finished. pts={len(app3d.probe_raw)}")
+    if event.button == 3 and app6d.drawing_probe:
+        app6d.drawing_probe = False
+        print(f"[UI] Probe finished. pts={len(app6d.probe_raw)}")
         print()
-        app3d.process_probe_and_predict()
+        if app6d.use_6d:
+            app6d.process_probe_and_predict_6d()
+        else:
+            app6d.process_probe_and_predict()
 
-def on_key(app3d, event):
+def on_key(app6d, event):
     key = event.key.lower()
 
-    if key == "l":
-        app3d.load_demo_spirals()
-
-    elif key == "t":
-        app3d.train_reference()
-
-    elif key == "p":
-        app3d.process_probe_and_predict()
-
-    elif key == "c":
-        app3d.clear()
+    if key == "c":
+        app6d.clear()
 
     elif key == "h":
-        app3d.smooth_enabled = not app3d.smooth_enabled
-        print(f"[UI] Smooth enabled: {app3d.smooth_enabled}")
+        app6d.smooth_enabled = not app6d.smooth_enabled
+        print(f"[UI] Smooth enabled: {app6d.smooth_enabled}")
+        print()
+
+    elif key == 'l':
+        app6d.load_demo_spirals()
+
+    elif key == "o":
+        app6d.load_demo_circles_with_orientation()
+
+    elif key == "m":
+        app6d.use_6d = not app6d.use_6d
+
+        mode_str = "6D (position + orientation)" if app6d.use_6d else "3D (position only)"
+        print(f"[UI] Switched mode -> {mode_str}")
         print()
 
     elif key == "n":
-        app3d.prediction_id += 1
-        app3d.line_ref_xy.set_color("tab:blue")
-        app3d.ref_raw = []
-        app3d.update_ref_lines()
+        app6d.prediction_id += 1
+        app6d.ref_raw = app6d.ref_eq = []
+        app6d.ref_rot_raw = app6d.ref_rot_eq = None
+        app6d.ref_legend.set_color("tab:red")
+        app6d.line_ref_xy.set_color("tab:red")
+        app6d.line_ref_3d.set_color("tab:red")
+        app6d.update_ref_lines()
         print("[UI] Ready to draw a new reference.")
         print()
 
+    elif key == "p":
+        if app6d.use_6d:
+            app6d.process_probe_and_predict_6d()
+        else:
+            app6d.process_probe_and_predict()
+
     elif key == "r":
-        app3d.prediction_id += 1
-        app3d.probe_raw = []
-        app3d.preds = None
-        app3d.gt = None
-        app3d.update_probe_lines()
-        app3d.update_pred_lines()
+        app6d.prediction_id += 1
+        app6d.probe_raw = app6d.probe_eq = []
+        app6d.probe_rot_raw = app6d.probe_rot_eq = None
+        app6d.preds = app6d.gt = None
+        app6d.update_probe_lines()
+        app6d.update_pred_lines()
         print("[UI] Probe reset. Ready to draw a new probe.")
         print()
 
-def xy_to_xyz(app3d, event):
+    elif key == "t":
+        if app6d.use_6d:
+            app6d.train_reference_6d()
+        else:
+            app6d.train_reference()
+
+def xy_to_xyz(app6d, event):
     """
     Convert XY plane event to XYZ coordinate (z=0).
     """
     return np.array([float(event.xdata), float(event.ydata), 0.0], dtype=np.float64)
 
-def yz_to_xyz(app3d, event):
+def yz_to_xyz(app6d, event):
     """
     Convert YZ plane event to XYZ coordinate (x=probe_plane_x).
     """
-    return np.array([app3d.probe_plane_x, float(event.xdata), float(event.ydata)], dtype=np.float64)
+    return np.array([app6d.probe_plane_x, float(event.xdata), float(event.ydata)], dtype=np.float64)
