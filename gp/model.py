@@ -360,10 +360,9 @@ def rollout_reference_6d(
 
         if output_type == 'delta':
             delta_world = y_pred[:3]
-            omega_b = y_pred[3:]
-
             next_pos = cur_pos + delta_world
 
+            omega_b = y_pred[3:]
             R_delta = so3_exp(omega_b)
             next_R = cur_R @ R_delta
 
