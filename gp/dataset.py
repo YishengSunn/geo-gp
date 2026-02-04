@@ -140,7 +140,7 @@ def build_dataset_6d(traj_pos: torch.Tensor,
                      traj_rot: torch.Tensor,
                      k: int,
                      input_type: str = 'spherical',
-                     output_type: str = 'twist'):
+                     output_type: str = 'delta'):
     """
     Build 6D dataset from trajectory with specified input and output types.
 
@@ -207,12 +207,6 @@ def build_dataset_6d(traj_pos: torch.Tensor,
             omega_b = so3_log(dR)
 
             Ys.append(torch.cat([deltas[i], omega_b], dim=0))
-
-            # # Linear velocity in body frame
-            # dp = traj_pos[i+1] - traj_pos[i]
-            # v_b = R_t.T @ dp
-
-            # Ys.append(torch.cat([v_b, omega_b], dim=0))
 
         elif output_type == 'absolute':
             Ys.append(torch.cat([traj_pos[i+1], traj_rot[i+1].reshape(-1)], dim=0))
