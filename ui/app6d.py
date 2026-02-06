@@ -2,7 +2,6 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 
-from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from config.runtime import (
     TRAIN_RATIO, SAMPLE_HZ, DEFAULT_SPEED, K_HIST, METHOD_ID
 )
@@ -11,7 +10,7 @@ from geometry.metrics import geom_mse
 from geometry.resample import resample_trajectory_3d_equal_dt, resample_trajectory_6d_equal_dt
 from gp.dataset import build_dataset_3d, build_dataset_6d, time_split
 from gp.model import train_gp, rollout_reference_3d, rollout_reference_6d
-from ui.handlers3d import on_press, on_move, on_release, on_key
+from ui.handlers6d import on_press, on_move, on_release, on_key
 from utils.misc import (
     moving_average_centered, moving_average_centered_6d, 
     smooth_prediction_by_velocity, smooth_prediction_by_twist_6d

@@ -1,4 +1,3 @@
-import csv
 import numpy as np
 
 from geometry.so3 import so3_log, so3_exp
@@ -60,26 +59,6 @@ def torch_to_np(x):
         numpy array
     """
     return x.detach().cpu().numpy()
-
-# ============================================================
-# Geometric helpers
-# ============================================================
-
-def closest_index(pt, arr):
-    """
-    Find the index of the point in arr that is closest to pt.
-    
-    Args:
-        pt: (2,) array-like, target point
-        arr: (N,2) array-like, array of points to search
-
-    Returns:
-        idx: int, index of the closest point in arr
-    """
-    arr = np.asarray(arr, dtype=np.float64)
-    d = np.linalg.norm(arr - pt[None, :], axis=1)
-
-    return int(np.argmin(d))
 
 # ============================================================
 # Smoothing helpers (post-processing)
@@ -314,38 +293,3 @@ def smooth_prediction_by_twist_6d(
         pred_rot_s[i] = cur_R
 
     return pred_pos_s, pred_rot_s
-
-def load_traj_all_csv(path):
-    """
-    Load trajectories from traj_all_*.csv exported by save_csv.
-
-    Returns:
-        ref_pts:   (N,2) np.ndarray
-        sampled:   (M,2) np.ndarray
-        probe_pts: (K,2) np.ndarray
-    """
-    ref_pts = []
-    sampled = []
-    probe_pts = []
-
-    with open(path, "r") as f:
-        reader = csv.DictReader(f)
-
-        for row in reader:
-            # Reference trajectory
-            if row["ref_x"] != "" and row["ref_y"] != "":
-                ref_pts.append([float(row["ref_x"]), float(row["ref_y"])])
-
-            # Sampled points
-            if row["sampled_x"] != "" and row["sampled_y"] != "":
-                sampled.append([float(row["sampled_x"]), float(row["sampled_y"])])
-
-            # Probe points
-            if row["probe_x"] != "" and row["probe_y"] != "":
-                probe_pts.append([float(row["probe_x"]), float(row["probe_y"])])
-
-    return (
-        np.asarray(ref_pts, dtype=np.float64),
-        np.asarray(sampled, dtype=np.float64),
-        np.asarray(probe_pts, dtype=np.float64),
-    )
