@@ -1,5 +1,9 @@
 import numpy as np
 
+from geometry.demos import (load_demo_spirals, load_demo_circles_with_orientation, 
+                            load_ref_xyz_from_csv, load_probe_xyz_from_csv
+)
+
 
 def on_press(app6d, event):
     """
@@ -68,7 +72,7 @@ def on_release(app6d, event):
             app6d.process_probe_and_predict()
 
 def on_key(app6d, event):
-    key = event.key.lower()
+    key = event.key
 
     if key == "c":
         app6d.clear()
@@ -78,11 +82,11 @@ def on_key(app6d, event):
         print(f"[UI] Smooth enabled: {app6d.smooth_enabled}")
         print()
 
-    elif key == 'l':
-        app6d.load_demo_spirals()
+    elif key == 'L':
+        load_demo_spirals(app6d)
 
-    elif key == "o":
-        app6d.load_demo_circles_with_orientation()
+    elif key == "O":
+        load_demo_circles_with_orientation(app6d)
 
     elif key == "m":
         app6d.use_6d = not app6d.use_6d
@@ -108,6 +112,9 @@ def on_key(app6d, event):
         else:
             app6d.process_probe_and_predict()
 
+    elif key == "P":
+        load_probe_xyz_from_csv(app6d, "data/ee_trajectory_2026-02-05_17-26-40.csv")
+
     elif key == "r":
         app6d.prediction_id += 1
         app6d.probe_raw = app6d.probe_eq = []
@@ -117,6 +124,9 @@ def on_key(app6d, event):
         app6d.update_pred_lines()
         print("[UI] Probe reset. Ready to draw a new probe.")
         print()
+
+    elif key == "R":
+        load_ref_xyz_from_csv(app6d, "data/ee_trajectory_2026-02-05_17-24-52.csv")
 
     elif key == "t":
         if app6d.use_6d:
