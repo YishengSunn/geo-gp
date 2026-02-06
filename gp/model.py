@@ -6,8 +6,6 @@ from config.runtime import (
     MAX_EXPERTS, MAX_DATA_PER_EXPERT, MIN_POINTS_OFFLINE, NEAREST_K, WINDOW_SIZE
 )
 from geometry.transforms import (
-    rotate_to_fixed_frame, 
-    polar_feat_from_xy_torch, 
     spherical_feat_from_xyz_torch, 
     direction_feat_from_xyz_torch
 )
@@ -79,105 +77,6 @@ def gp_predict(info, feat_1xD):
     y = torch_to_np(scaler.y_inverse(torch.tensor(mu)))  # Shape: (1, D_out)
 
     return y, var  # Return numpy with shape (1, D_out)
-
-def rollout_reference(model_info, traj, start_t, h, k, input_type, output_type, scaler=None):
-    """
-    Rollout trajectory using GP model from a given start time for h steps.
-
-    Args:
-        model_info: dict with 'gp_model' and 'scaler'
-        traj: torch tensor of shape (T, 2)
-        start_t: int, starting time index
-        h: int, rollout horizon
-        k: int, history length
-        input_type: str, input feature type
-        output_type: str, output type
-        scaler: Standardizer object (optional)
-    
-    Returns:
-        preds: torch tensor of shape (h, 2), predicted positions
-        gt: torch tensor of shape (h, 2), ground truth positions
-        h: int, rollout horizon
-        vars_seq: numpy array of shape (h,), variance at each step
-    """
-    assert start_t >= (k - 1), f"start_t= {start_t} 太小，至少需要 {k - 1}"
-
-    T = traj.shape[0]
-    h = max(0, h)
-
-    # Keep consistent with training: use global origin and global base_dir
-    global_origin = traj[0]
-    if traj.shape[0] > 1:
-        end_idx = min(10, traj.shape[0] - 1)
-        dirs = traj[1:end_idx+1] - traj[0]
-        global_base_dir = dirs.mean(dim=0)
-    else:
-        print("Insufficient trajectory points to compute global direction, using default direction!")
-        global_base_dir = torch.tensor([1.0, 0.0])
-
-    # Initialize historical positions and deltas
-    hist_pos = []  # List of k positions
-    hist_del = []  # List of k deltas
-    for i in range(k):
-        idx = start_t - (k - 1) + i
-        hist_pos.append(traj[idx].clone())
-        prev = traj[idx - 1] if idx - 1 >= 0 else traj[0]
-        hist_del.append(traj[idx] - prev)
-
-    cur_pos = hist_pos[-1].clone()  # Current position
-    preds_std = []                  # Store standardized predictions
-    preds_pos = []                  # Store actual positions (after inverse standardization)
-    vars_seq = []                   # Store variance at each step
-
-    for _ in range(h):
-        feats = []
-
-        if 'polar' in input_type:
-            # Keep consistent with training: use global_origin
-            polar_feat = polar_feat_from_xy_torch(torch.stack(hist_pos[-k:]), global_origin)
-            feats.append(polar_feat.reshape(1, -1))  # Shape: (1, 2K)
-
-        if 'delta' in input_type:
-            # Keep consistent with training: use global_base_dir
-            delta_feat = rotate_to_fixed_frame(torch.stack(hist_del[-k:]), global_base_dir)
-            feats.append(delta_feat.reshape(1, -1))  # Shape: (1, 2(K-1))
-
-        x = torch.cat(feats, dim=1)  # Shape: (1, D)
-
-        # GP prediction
-        y_pred, var = gp_predict(model_info, x)
-        y_pred = torch.tensor(y_pred, dtype=torch.float32)  # Ensure tensor type consistency
-        preds_std.append(y_pred[0])
-        vars_seq.append(var)  # Save variance
-
-        # Inverse standardization of output is done only once at the end  
-        # During rollout, still use standardized step/delta for calculation
-        if output_type == 'delta':
-            gb = global_base_dir / global_base_dir.norm()
-            R = torch.stack([gb, torch.tensor([-gb[1], gb[0]])], dim=1)
-            step_world = y_pred @ R.T  # Shape: (1, 2)
-            next_pos = cur_pos + step_world[0]
-            next_del = step_world[0]
-        elif output_type == 'polar_next':
-            r = y_pred[0, 0]
-            cos_t = y_pred[0, 1]
-            sin_t = y_pred[0, 2]
-            next_pos = global_origin + r * torch.tensor([cos_t, sin_t], dtype=torch.float32)
-            next_del = next_pos - cur_pos
-        else:
-            raise ValueError("Unsupported output_type")
-        
-        # Update history
-        hist_pos.append(next_pos)
-        hist_del.append(next_del)
-        cur_pos = next_pos
-        preds_pos.append(next_pos)
-        
-    preds = torch.stack(preds_pos, dim=0)
-
-    # Ground truth (optional, for debugging)
-    gt = traj[start_t + 1: start_t + 1 + h]
-    return preds, gt, h, np.array(vars_seq)
 
 def rollout_reference_3d(
     model_info,

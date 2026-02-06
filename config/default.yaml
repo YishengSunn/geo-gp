@@ -32,53 +32,8 @@ gp:
 # Method
 # =========================
 method:
-  id: 1               # 1: polar->delta, 5: polar+delta->delta
-  configs:
-    1: ['polar', 'delta']
-    2: ['delta', 'delta']
-    3: ['polar', 'absolute']
-    4: ['delta', 'absolute']
-    5: ['polar+delta', 'delta']
-    6: ['polar+delta', 'absolute']
-    7: ['polar', 'polar_next']
-    8: ['delta', 'polar_next']
-    9: ['polar+delta', 'polar_next']
+  id: 1
   hparams:
     1:
       adam_lr: 0.001
       adam_steps: 1
-
-# =========================
-# Matching / prediction
-# =========================
-matching:
-  mode: angle
-
-# =========================
-# Anchor / angle logic
-# =========================
-anchor:
-  min_start_angle_diff_deg: 15
-  anchor_angle_deg: 30
-  phi0_k_ref: 500
-  phi0_k_probe: 500
-  select_horizon: 100
-
-# =========================
-# UI
-# =========================
-ui:
-  domain:
-    xmin: -1.5
-    xmax:  1.5
-    ymin: -1.5
-    ymax:  1.5
-
-  line_widths:
-    draw: 2.0
-    sampled: 1.0
-    gt: 1.0
-    pred: 1.0
-    seed: 1.5
-    probe: 2.0
-    pred_scaled: 1.0

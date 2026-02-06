@@ -60,26 +60,6 @@ def torch_to_np(x):
     return x.detach().cpu().numpy()
 
 # ============================================================
-# Geometric helpers
-# ============================================================
-
-def closest_index(pt, arr):
-    """
-    Find the index of the point in arr that is closest to pt.
-    
-    Args:
-        pt: (2,) array-like, target point
-        arr: (N,2) array-like, array of points to search
-
-    Returns:
-        idx: int, index of the closest point in arr
-    """
-    arr = np.asarray(arr, dtype=np.float64)
-    d = np.linalg.norm(arr - pt[None, :], axis=1)
-
-    return int(np.argmin(d))
-
-# ============================================================
 # Smoothing helpers (post-processing)
 # ============================================================
 
