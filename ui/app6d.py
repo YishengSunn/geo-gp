@@ -82,11 +82,11 @@ class DrawApp6D:
         self.ax_xy.set_aspect("equal", adjustable="box")
         self.ax_yz.set_aspect("equal", adjustable="box")
 
-        self.ax_xy.set_xlim(-2, 2)
-        self.ax_xy.set_ylim(-2, 2)
+        self.ax_xy.set_xlim(-1, 1)
+        self.ax_xy.set_ylim(-1, 1)
 
-        self.ax_yz.set_xlim(-2, 2)
-        self.ax_yz.set_ylim(-2, 2)
+        self.ax_yz.set_xlim(-1, 1)
+        self.ax_yz.set_ylim(-1, 1)
 
         # Init lines (2D)
         (self.line_ref_xy,) = self.ax_xy.plot([], [], lw=2.5, c='r', label="ref")
@@ -259,7 +259,7 @@ class DrawApp6D:
         # 4) Rollout in ref frame
         self.preds = None
 
-        mse_thresh = 0.05
+        mse_thresh = 0.01
         drop_k = 5
         max_retries = 5
 
@@ -487,7 +487,7 @@ class DrawApp6D:
                         break
 
             # Geometric drift check (position only)
-            mse_full = geom_mse(cur_pos, self.ref_eq)
+            mse_full = geom_mse(cur_pos, self.ref_eq, np.mininum(len(cur_pos), len(self.ref_eq)))
             print(f"[GeomCheck] full mse = {mse_full:.4f}")
 
             if mse_full > mse_thresh:
@@ -549,107 +549,6 @@ class DrawApp6D:
 
         self.update_pred_lines()
         print(f"[Predict] Done. preds={self.preds.shape}")
-        print()
-
-    def load_demo_spirals(self, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
-        """
-        Load a demo pair of 3D spirals into ref_raw and probe_raw.
-
-        - Reference: vertical helix around z-axis.
-        - Probe: horizontal helix that lies on the drawing plane x=probe_plane_x (roughly),
-                but also progresses along +x to mimic "forward motion".
-
-        Args:
-            T: int, number of points
-            turns: float, total angle in radians for the spirals
-            radius: float, radius of the spirals
-            speed: float, speed of vertical/horizontal progression
-        """
-        t = np.linspace(0.0, float(turns), int(T), dtype=np.float64)
-
-        # Reference (vertical helix): (x,y,z) = (cos, sin, speed*t)
-        ref = np.stack([radius * np.cos(t), radius * np.sin(t), speed * t], axis=1)
-
-        # Probe (horizontal-ish helix): progress along x, circle in (y,z), keep near x=probe_plane_x
-        probe = np.stack(
-            [np.full_like(t, self.probe_plane_x) + speed * t,
-            radius * np.cos(t),
-            radius * np.sin(t)],
-            axis=1
-        )
-
-        self.ref_raw = ref.tolist()
-        self.probe_raw = probe[:50].tolist()
-
-        # Reset derived buffers / outputs
-        self.ref_eq = self.probe_eq = None
-        self.model_info = None
-        self.R = self.s = self.t = None
-        self.preds = self.gt = None
-        self.probe_goal = None
-
-        self.update_ref_lines()
-        self.update_probe_lines()
-        self.update_pred_lines()
-
-        print(f"[Demo] Loaded spirals: ref_raw={len(self.ref_raw)}, probe_raw={len(self.probe_raw)}")
-        print()
-
-    def load_demo_circles_with_orientation(self, *, T=400, r_ref=0.5, r_probe=1.0):
-        """
-        Load a demo pair of 3D circles with orientations into ref_raw and probe_raw.
-        - Reference: small circle on XY plane, oriented to face center
-        - Probe: first quarter of larger circle, oriented to face center
-
-        Args:
-            T: int, number of points for reference circle
-            r_ref: float, radius of reference circle
-            r_probe: float, radius of probe circle
-        """
-        t = np.linspace(0, 2*np.pi, T)
-
-        # Reference small circle on XY plane
-        ref_pos = np.stack([r_ref*np.cos(t), r_ref*np.sin(t), np.zeros_like(t)], axis=1)
-
-        # Orientation: x-axis points to center
-        ref_rot = []
-        for p in ref_pos:
-            x_axis = -p / np.linalg.norm(p)
-            z_axis = np.array([0, 0, 1.0])
-            y_axis = np.cross(z_axis, x_axis)
-            y_axis /= np.linalg.norm(y_axis)
-            z_axis = np.cross(x_axis, y_axis)
-            R = np.stack([x_axis, y_axis, z_axis], axis=1)
-            ref_rot.append(R)
-        ref_rot = np.asarray(ref_rot)
-
-        # Probe: first quarter of larger circle, translated
-        tp = np.linspace(0, np.pi/2, T//4)
-        probe_pos = np.stack([np.zeros_like(tp)+1.5, r_probe*np.cos(tp), r_probe*np.sin(tp)], axis=1)
-
-        probe_rot = []
-        for p in probe_pos:
-            center = np.array([1.5, 0.0, 0.0])
-            x_axis = (center - p)
-            x_axis /= np.linalg.norm(x_axis)
-            z_axis = np.array([1.0, 0, 0.0])
-            y_axis = np.cross(z_axis, x_axis)
-            y_axis /= np.linalg.norm(y_axis)
-            z_axis = np.cross(x_axis, y_axis)
-            R = np.stack([y_axis, x_axis, z_axis], axis=1)
-            probe_rot.append(R)
-        probe_rot = np.asarray(probe_rot)
-
-        self.ref_raw = ref_pos.tolist()
-        self.probe_raw = probe_pos.tolist()
-        self.ref_rot_raw = ref_rot
-        self.probe_rot_raw = probe_rot
-
-        self.update_ref_lines()
-        self.update_probe_lines()
-        self.update_pred_lines()
-
-        print(f"[Demo] Loaded circles with orientation: ref_raw={len(self.ref_raw)}, probe_raw={len(self.probe_raw)}")
         print()
 
     def update_ref_lines(self):
