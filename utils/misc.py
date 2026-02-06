@@ -1,8 +1,6 @@
 import csv
 import numpy as np
 
-from geometry.so3 import so3_log, so3_exp
-
 
 # ============================================================
 # Standardization helpers
@@ -120,58 +118,6 @@ def moving_average_centered(arr, win):
         
     return out
 
-def moving_average_centered_6d(arr, win):
-    """
-    Centered moving average smoothing along time axis (axis=0).
-
-    Supports:
-        - (N, d) Euclidean features (position, spherical, etc.)
-        - (N, 3, 3) rotation matrices (SO(3)) via log-exp smoothing
-
-    Args:
-        arr: array-like
-        win: int, window size (odd preferred)
-
-    Returns:
-        out: smoothed array, same shape as input
-    """
-    arr = np.asarray(arr, dtype=np.float64)
-
-    # Rotation
-    if arr.ndim == 3 and arr.shape[1:] == (3, 3):
-        # Convert rotations to so(3) vectors
-        omegas = np.array([so3_log(R) for R in arr])  # (N,3)
-
-        # Smooth in R^3
-        omegas_s = moving_average_centered(omegas, win)
-
-        # Map back to SO(3)
-        R_s = np.array([so3_exp(w) for w in omegas_s])
-        return R_s
-
-    # Position
-    if arr.ndim == 1:
-        arr = arr[:, None]
-
-    win = int(win)
-    if win < 3:
-        return arr
-    if win % 2 == 0:
-        win += 1
-
-    pad = win // 2
-    if arr.shape[0] <= 1:
-        return arr
-
-    padded = np.pad(arr, ((pad, pad), (0, 0)), mode="reflect")
-    kernel = np.ones(win, dtype=np.float64) / float(win)
-
-    out = np.empty_like(arr, dtype=np.float64)
-    for d in range(arr.shape[1]):
-        out[:, d] = np.convolve(padded[:, d], kernel, mode="valid")
-
-    return out
-
 def smooth_prediction_by_velocity(
     probe: np.ndarray,
     pred: np.ndarray,
@@ -227,97 +173,12 @@ def smooth_prediction_by_velocity(
 
     return out
 
-def smooth_prediction_by_twist_6d(
-    probe_pos: np.ndarray,
-    probe_rot: np.ndarray,
-    pred_pos: np.ndarray,
-    pred_rot: np.ndarray,
-    *,
-    win: int = 9,
-    blend_first_step_pos: float = 0.8,
-    blend_first_step_rot: float = 0.8,
-    eps: float = 1e-12,
-):
-    """
-    Smooth 6D predicted trajectory by smoothing per-step twist in WORLD/PROBE frame:
-      - translation part: smooth Δp (world-frame)
-      - rotation part: smooth ω where Exp(ω) = R_{t}^T R_{t+1}  (body-frame incremental rotation)
-
-    This keeps continuity w.r.t. the last probe pose and blends the first step to preserve
-    the exiting direction (both translation and rotation).
-
-    Args:
-        probe_pos: (Np, 3) probe positions up to current time
-        probe_rot: (Np, 3, 3) probe rotations up to current time
-        pred_pos:  (Hp, 3) predicted future positions (starting AFTER probe end)
-        pred_rot:  (Hp, 3, 3) predicted future rotations (starting AFTER probe end)
-        win: centered moving-average window (odd preferred)
-        blend_first_step_pos: blend factor for first Δp
-        blend_first_step_rot: blend factor for first ω
-        eps: numerical threshold
-
-    Returns:
-        pred_pos_s: (Hp, 3) smoothed predicted positions
-        pred_rot_s: (Hp, 3, 3) smoothed predicted rotations (still in SO(3))
-    """
-    probe_pos = np.asarray(probe_pos, dtype=np.float64)
-    pred_pos  = np.asarray(pred_pos,  dtype=np.float64)
-    probe_rot = np.asarray(probe_rot, dtype=np.float64)
-    pred_rot  = np.asarray(pred_rot,  dtype=np.float64)
-
-    Hp = pred_pos.shape[0]
-    if Hp == 0:
-        return pred_pos, pred_rot
-    if probe_pos.shape[0] < 2 or probe_rot.shape[0] < 2:
-        return pred_pos, pred_rot
-
-    # Translation: smooth Δp
-    p_last = probe_pos[-1]
-    full_p = np.vstack([p_last[None, :], pred_pos])  # (Hp+1, 3)
-    v = np.diff(full_p, axis=0)                      # (Hp, 3)
-
-    v_s = moving_average_centered(v, int(win))
-
-    # Blend first step with probe's last delta
-    v0_probe = probe_pos[-1] - probe_pos[-2]
-    if np.linalg.norm(v0_probe) > eps:
-        v_s[0] = float(blend_first_step_pos) * v0_probe + (1.0 - float(blend_first_step_pos)) * v_s[0]
-
-    pred_pos_s = np.empty_like(pred_pos)
-    cur_p = p_last.copy()
-    for i in range(Hp):
-        cur_p = cur_p + v_s[i]
-        pred_pos_s[i] = cur_p
-
-    # Rotation: smooth ω from relative rotations
-    # ω_i = Log( R_{i}^T R_{i+1} )
-    R_last = probe_rot[-1]
-    full_R = np.concatenate([R_last[None, :, :], pred_rot], axis=0)  # (Hp+1, 3, 3)
-
-    omegas = np.empty((Hp, 3), dtype=np.float64)
-    for i in range(Hp):
-        dR = full_R[i].T @ full_R[i+1]
-        omegas[i] = so3_log(dR)
-
-    omegas_s = moving_average_centered(omegas, int(win))
-
-    # Blend first step with probe's last angular increment
-    dR_probe = probe_rot[-2].T @ probe_rot[-1]
-    omega0_probe = so3_log(dR_probe)
-    if np.linalg.norm(omega0_probe) > eps:
-        omegas_s[0] = float(blend_first_step_rot) * omega0_probe + (1.0 - float(blend_first_step_rot)) * omegas_s[0]
-
-    pred_rot_s = np.empty_like(pred_rot)
-    cur_R = R_last.copy()
-    for i in range(Hp):
-        cur_R = cur_R @ so3_exp(omegas_s[i])
-        pred_rot_s[i] = cur_R
-
-    return pred_pos_s, pred_rot_s
-
 def load_traj_all_csv(path):
     """
     Load trajectories from traj_all_*.csv exported by save_csv.
+
+    Args:
+        path: str, path to the CSV file
 
     Returns:
         ref_pts:   (N,2) np.ndarray
