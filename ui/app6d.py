@@ -300,7 +300,7 @@ class DrawApp6D:
                         break
 
             # Geometric drift check
-            mse_full = geom_mse(cur_hist, self.ref_eq)
+            mse_full = geom_mse(cur_hist, self.ref_eq, min(len(cur_hist), len(self.ref_eq)))
             print(f"[GeomCheck] full mse = {mse_full:.4f}")
 
             if mse_full > mse_thresh:
@@ -433,7 +433,7 @@ class DrawApp6D:
         probe_rot_in_ref = R.T @ self.probe_rot_eq
 
         # 4) Rollout in ref frame
-        mse_thresh = 0.05
+        mse_thresh = 0.01
         drop_k = 5
         max_retries = 5
 
@@ -486,7 +486,7 @@ class DrawApp6D:
                         break
 
             # Geometric drift check (position only)
-            mse_full = geom_mse(cur_pos, self.ref_eq, np.mininum(len(cur_pos), len(self.ref_eq)))
+            mse_full = geom_mse(cur_pos, self.ref_eq, min(len(cur_pos), len(self.ref_eq)))
             print(f"[GeomCheck] full mse = {mse_full:.4f}")
 
             if mse_full > mse_thresh:
