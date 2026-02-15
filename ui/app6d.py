@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from config.runtime import (
     TRAIN_RATIO, SAMPLE_HZ, DEFAULT_SPEED, K_HIST, METHOD_ID
 )
-from geometry.frame3d import estimate_rotation_scale_3d_search_by_count
+from geometry.frame6d import estimate_rotation_scale_3d_search_by_count
 from geometry.metrics import geom_mse
 from geometry.resample import resample_trajectory_3d_equal_dt, resample_trajectory_6d_equal_dt
 from gp.dataset import build_dataset_3d, build_dataset_6d, time_split
@@ -243,8 +243,6 @@ class DrawApp6D:
         R, s, t = estimate_rotation_scale_3d_search_by_count(
             self.ref_eq,
             self.probe_eq,
-            s_min=0.5,
-            s_max=2.0,
             margin_pts=300,
             step=10,
         )[:3]
@@ -420,8 +418,6 @@ class DrawApp6D:
         R, s, t = estimate_rotation_scale_3d_search_by_count(
             self.ref_eq,
             self.probe_eq,
-            s_min=0.5,
-            s_max=2.0,
             margin_pts=300,
             step=10,
         )[:3]
@@ -430,7 +426,6 @@ class DrawApp6D:
         # 3) Transform probe into ref frame
         probe_in_ref = ((self.probe_eq - t) / s) @ R
         self.probe_goal = self.s * (self.ref_eq[-1] @ self.R.T) + self.t
-        probe_rot_in_ref = R.T @ self.probe_rot_eq
 
         # 4) Rollout in ref frame
         mse_thresh = 0.01
@@ -442,7 +437,7 @@ class DrawApp6D:
 
         for attempt in range(max_retries):
             cur_pos = probe_in_ref.copy()
-            cur_rot = probe_rot_in_ref.copy()
+            cur_rot = self.probe_rot_eq.copy()
 
             preds_world_pos = []
             preds_world_rot = []
@@ -463,20 +458,20 @@ class DrawApp6D:
                     k=k,
                     input_type=input_type,
                     output_type=output_type,
+                    R_ref_probe=self.R,
                 )
 
                 next_ref_pos = preds_ref_pos[-1].numpy()
-                next_ref_rot = preds_ref_rot[-1].numpy()
 
                 next_world_pos = self.s * (next_ref_pos @ self.R.T) + self.t
-                next_world_rot = self.R @ next_ref_rot
+                next_world_rot = preds_ref_rot[-1].numpy()
 
                 preds_world_pos.append(next_world_pos)
                 preds_world_rot.append(next_world_rot)
 
                 # Update history in ref frame
                 cur_pos = np.vstack([cur_pos, next_ref_pos])
-                cur_rot = np.vstack([cur_rot, next_ref_rot[None, :, :]])
+                cur_rot = np.vstack([cur_rot, next_world_rot[None, :, :]])
 
                 # Truncation logic
                 if self.probe_goal is not None:
