@@ -87,7 +87,7 @@ def load_demo_circles_with_orientation(app6d, *, T=400, r_ref=0.5, r_probe=1.0):
         y_axis = np.cross(z_axis, x_axis)
         y_axis /= np.linalg.norm(y_axis)
         z_axis = np.cross(x_axis, y_axis)
-        R = np.stack([x_axis, y_axis, z_axis], axis=1)
+        R = np.stack([y_axis, z_axis, x_axis], axis=1)
         probe_rot.append(R)
     probe_rot = np.asarray(probe_rot)
 
