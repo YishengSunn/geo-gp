@@ -189,6 +189,7 @@ def rollout_reference_6d(
     k,
     input_type='spherical',
     output_type='delta',
+    R_ref_probe=None,
 ):
     """
     6D rollout trajectory (position + orientation) using GP model from a given start time for h steps.
@@ -202,6 +203,7 @@ def rollout_reference_6d(
         k: int, history length (number of past deltas)
         input_type: 'delta', 'pos', 'pos+delta', 'spherical', or 'spherical+delta'
         output_type: 'delta' or 'absolute'
+        R_ref_probe: (3, 3) rotation matrix, reference to probe frame rotation
 
     Returns:
         preds_pos: torch tensor of shape (h, 3), predicted positions
@@ -213,6 +215,7 @@ def rollout_reference_6d(
     assert traj_pos.ndim == 2 and traj_pos.shape[1] == 3, f"Expected traj_pos shape (T,3), got {traj_pos.shape}!"
     assert traj_rot.ndim == 3 and traj_rot.shape[1:] == (3, 3), f"Expected traj_rot shape (T,3,3), got {traj_rot.shape}!"
     assert start_t >= k, f"start_t={start_t} must be >= {k}!"
+    R_ref_probe = torch.tensor(R_ref_probe, dtype=torch.float32) if R_ref_probe is not None else None
 
     global_origin = traj_pos[0]
 
@@ -263,6 +266,8 @@ def rollout_reference_6d(
 
             omega_b = y_pred[3:]
             R_delta = so3_exp(omega_b)
+            if R_ref_probe is not None:
+                R_delta = R_ref_probe.T @ R_delta @ R_ref_probe
             next_R = cur_R @ R_delta
 
         elif output_type == 'absolute':
