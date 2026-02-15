@@ -12,7 +12,7 @@ def estimate_rotation_scale_3d(ref_pts, probe_pts, eps=1e-12):
         sum_i || probe_i - (s * (ref_i @ R.T) + t) ||^2
 
     Args:
-        ref_pts:  array-like (N, 3)
+        ref_pts: array-like (N, 3)
         probe_pts: array-like (N, 3)
         eps: numerical stability
 
@@ -54,11 +54,8 @@ def estimate_rotation_scale_3d(ref_pts, probe_pts, eps=1e-12):
     denom = np.sum(Xr * Xr) + eps
     s = float(np.sum(Yc * Xr) / denom)
 
-    # (Optional) enforce positive scale (usually you want s>0)
+    # Enforce positive scale
     if s < 0:
-        # Flip rotation 180° around any axis is messy; simplest is:
-        # treat negative s as invalid and clamp or abs.
-        # Here we take abs and keep R (common in practice).
         s = abs(s)
 
     # 4) Translation to match centroids
@@ -73,8 +70,6 @@ def estimate_rotation_scale_3d_search_by_count(
     ref_eq: np.ndarray,
     probe_eq: np.ndarray,
     *,
-    s_min: float = 0.5,
-    s_max: float = 2.0,
     margin_pts: int = 20,
     step: int = 1,
 ):
@@ -86,8 +81,6 @@ def estimate_rotation_scale_3d_search_by_count(
     Args:
         ref_eq: (M,3) array-like, reference 3D curve points
         probe_eq: (N,3) array-like, probe 3D curve points
-        s_min: float, minimum expected scale
-        s_max: float, maximum expected scale
         margin_pts: int, number of extra points to consider around expected length
         step: int, step size for searching end index in ref_eq
     
