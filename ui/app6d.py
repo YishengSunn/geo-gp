@@ -437,7 +437,7 @@ class DrawApp6D:
 
         for attempt in range(max_retries):
             cur_pos = probe_in_ref.copy()
-            cur_rot = self.probe_rot_eq.copy()
+            cur_rot = self.probe_rot_eq.copy()[:cur_pos.shape[0]]
 
             preds_world_pos = []
             preds_world_rot = []
@@ -524,7 +524,6 @@ class DrawApp6D:
                 break
 
             probe_in_ref = probe_in_ref[:-drop_k]
-            probe_rot_in_ref = probe_rot_in_ref[:-drop_k]
             print(f"[Recover] Dropping last {drop_k} probe points, retry {attempt+1}")
 
         if self.preds is None:
@@ -532,7 +531,7 @@ class DrawApp6D:
             return
 
         # 5) Smooth prediction by twist
-        if self.smooth_enabled:
+        if self.smooth_enabled and output_type == 'delta':
             self.preds, self.preds_rot = smooth_prediction_by_twist_6d(
                 probe_pos=self.probe_eq,
                 probe_rot=self.probe_rot_eq,
