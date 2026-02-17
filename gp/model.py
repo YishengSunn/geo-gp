@@ -267,12 +267,12 @@ def rollout_reference_6d(
             omega_b = y_pred[3:]
             R_delta = so3_exp(omega_b)
             if R_ref_probe is not None:
-                R_delta = R_ref_probe.T @ R_delta @ R_ref_probe
-            next_R = cur_R @ R_delta
+                R_delta = R_ref_probe @ R_delta @ R_ref_probe.T
+            next_R = R_delta @ cur_R
 
         elif output_type == 'absolute':
             next_pos = y_pred[:3]
-            next_R = y_pred[3:].reshape(3, 3)
+            next_R = R_ref_probe @ y_pred[3:].reshape(3, 3) if R_ref_probe is not None else y_pred[3:].reshape(3, 3)
 
             delta_world = next_pos - cur_pos
 
