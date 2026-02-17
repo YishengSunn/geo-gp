@@ -1,6 +1,6 @@
 import torch
 
-from geometry.so3 import so3_log
+from utils.so3 import so3_log
 from geometry.features import (
     spherical_feat_from_xyz_torch, 
     direction_feat_from_xyz_torch

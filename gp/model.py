@@ -5,7 +5,7 @@ from config.runtime import (
     METHOD_ID, METHOD_HPARAM, 
     MAX_EXPERTS, MAX_DATA_PER_EXPERT, MIN_POINTS_OFFLINE, NEAREST_K, WINDOW_SIZE
 )
-from geometry.so3 import so3_exp
+from utils.so3 import so3_exp
 from geometry.features import (
     spherical_feat_from_xyz_torch, 
     direction_feat_from_xyz_torch

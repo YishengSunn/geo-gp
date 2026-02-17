@@ -1,6 +1,6 @@
 import numpy as np
 
-from geometry.so3 import so3_log, so3_exp
+from utils.so3 import so3_log, so3_exp
 
 
 # ============================================================
