@@ -127,29 +127,9 @@ def moving_average_centered_6d(arr, win):
         # Map back to SO(3)
         R_s = np.array([so3_exp(w) for w in omegas_s])
         return R_s
-
-    # Position
-    if arr.ndim == 1:
-        arr = arr[:, None]
-
-    win = int(win)
-    if win < 3:
-        return arr
-    if win % 2 == 0:
-        win += 1
-
-    pad = win // 2
-    if arr.shape[0] <= 1:
-        return arr
-
-    padded = np.pad(arr, ((pad, pad), (0, 0)), mode="reflect")
-    kernel = np.ones(win, dtype=np.float64) / float(win)
-
-    out = np.empty_like(arr, dtype=np.float64)
-    for d in range(arr.shape[1]):
-        out[:, d] = np.convolve(padded[:, d], kernel, mode="valid")
-
-    return out
+    
+    else:
+        return moving_average_centered(arr, win)
 
 def smooth_prediction_by_velocity(
     probe: np.ndarray,
