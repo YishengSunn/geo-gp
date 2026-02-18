@@ -1,6 +1,8 @@
 import csv
 import numpy as np
 
+from utils.quaternion import quat_between_vectors
+
 
 def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
     """
@@ -48,59 +50,55 @@ def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
 
 def load_demo_circles_with_orientation(app6d, *, T=400, r_ref=0.5, r_probe=1.0):
     """
-    Load a demo pair of 3D circles with orientations into ref_raw and probe_raw.
-    - Reference: small circle on XY plane, oriented to face center
-    - Probe: first quarter of larger circle, oriented to face center
+    Load a demo pair of circles with orientation into ref_raw/probe_raw and ref_quat_raw/probe_quat_raw.
+    - Reference: circle in the xy-plane, centered at origin, with radius r_ref.
+    - Probe: circle in the yz-plane, centered at (probe_plane_x, 0, 0), with radius r_probe.
+    The orientations (quaternions) are set so that the "front" of each point faces towards the center of its circle.
 
     Args:
-        T: int, number of points for reference circle
-        r_ref: float, radius of reference circle
-        r_probe: float, radius of probe circle
+        T: int, number of points per circle
+        r_ref: float, radius of the reference circle
+        r_probe: float, radius of the probe circle
     """
+    # Reference
     t = np.linspace(0, 2*np.pi, T)
-
-    # Reference small circle on XY plane
     ref_pos = np.stack([r_ref*np.cos(t), r_ref*np.sin(t), np.zeros_like(t)], axis=1)
 
-    # Orientation: x-axis points to center
-    ref_rot = []
+    ref_quat = []
     for p in ref_pos:
-        x_axis = -p / np.linalg.norm(p)
-        z_axis = np.array([0, 0, 1.0])
-        y_axis = np.cross(z_axis, x_axis)
-        y_axis /= np.linalg.norm(y_axis)
-        z_axis = np.cross(x_axis, y_axis)
-        R = np.stack([x_axis, y_axis, z_axis], axis=1)
-        ref_rot.append(R)
-    ref_rot = np.asarray(ref_rot)
+        target_dir = -p / np.linalg.norm(p)
+        q = quat_between_vectors(np.array([1,0,0]), target_dir)
+        ref_quat.append(q)
 
-    # Probe: first quarter of larger circle, translated
+    ref_quat = np.asarray(ref_quat)
+
+    # Probe
     tp = np.linspace(0, np.pi/2, T//4)
     probe_pos = np.stack([np.zeros_like(tp)+1.5, r_probe*np.cos(tp), r_probe*np.sin(tp)], axis=1)
 
-    probe_rot = []
+    probe_quat = []
+    center = np.array([1.5, 0.0, 0.0])
+
     for p in probe_pos:
-        center = np.array([1.5, 0.0, 0.0])
-        x_axis = (center - p)
-        x_axis /= np.linalg.norm(x_axis)
-        z_axis = np.array([1.0, 0, 0.0])
-        y_axis = np.cross(z_axis, x_axis)
-        y_axis /= np.linalg.norm(y_axis)
-        z_axis = np.cross(x_axis, y_axis)
-        R = np.stack([y_axis, z_axis, x_axis], axis=1)
-        probe_rot.append(R)
-    probe_rot = np.asarray(probe_rot)
+        target_dir = center - p
+        target_dir /= np.linalg.norm(target_dir)
+
+        q = quat_between_vectors(np.array([1,0,0]), target_dir)
+        probe_quat.append(q)
+
+    probe_quat = np.asarray(probe_quat)
 
     app6d.ref_raw = ref_pos.tolist()
     app6d.probe_raw = probe_pos.tolist()
-    app6d.ref_rot_raw = ref_rot
-    app6d.probe_rot_raw = probe_rot
+
+    app6d.ref_quat_raw = ref_quat
+    app6d.probe_quat_raw = probe_quat
 
     app6d.update_ref_lines()
     app6d.update_probe_lines()
     app6d.update_pred_lines()
 
-    print(f"[Demo] Loaded circles with orientation: ref_raw={len(app6d.ref_raw)}, probe_raw={len(app6d.probe_raw)}")
+    print(f"[Demo] Loaded circles with quaternion orientation: ref_raw={len(app6d.ref_raw)}, probe_raw={len(app6d.probe_raw)}")
     print()
 
 def load_ref_xyz_from_csv(app6d, filepath):
@@ -132,7 +130,7 @@ def load_ref_xyz_from_csv(app6d, filepath):
         return
 
     app6d.ref_raw = pts
-    app6d.ref_rot_raw = None
+    app6d.ref_quat_raw = None
 
     app6d.update_ref_lines()
     print(f"[LoadCSV] Loaded {len(app6d.ref_raw)} reference points from CSV.")
@@ -167,7 +165,7 @@ def load_probe_xyz_from_csv(app6d, filepath):
         return
 
     app6d.probe_raw = pts
-    app6d.probe_rot_raw = None
+    app6d.probe_quat_raw = None
 
     app6d.update_probe_lines()
     print(f"[LoadCSV] Loaded {len(app6d.probe_raw)} probe points from CSV.")
