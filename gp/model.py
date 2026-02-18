@@ -11,6 +11,7 @@ from geometry.features import (
     direction_feat_from_xyz_torch
 )
 from gp.skygp_moe import SkyGP_MOE
+from utils.quaternion import rotmat_to_quat, quat_mul, quat_inv, quat_normalize
 from utils.misc import torch_to_np, Standardizer
 
 def train_gp(dataset, method_id=METHOD_ID):
@@ -183,7 +184,7 @@ def rollout_reference_3d(
 def rollout_reference_6d(
     model_info,
     traj_pos,
-    traj_rot,
+    traj_quat,
     start_t,
     h,
     k,
@@ -197,7 +198,7 @@ def rollout_reference_6d(
     Args:
         model_info: dict with 'gp_model' and 'scaler'
         traj_pos: torch tensor of shape (T, 3), positions
-        traj_rot: torch tensor of shape (T, 3, 3), orientations (rotation matrices)
+        traj_quat: torch tensor of shape (T, 4), orientations (quaternions)
         start_t: int, starting time index (position index)
         h: int, rollout horizon (number of future steps)
         k: int, history length (number of past deltas)
@@ -207,30 +208,31 @@ def rollout_reference_6d(
 
     Returns:
         preds_pos: torch tensor of shape (h, 3), predicted positions
-        preds_rot: torch tensor of shape (h, 3, 3), predicted orientations
+        preds_quat: torch tensor of shape (h, 4), predicted orientations (quaternions)
         gt_pos: torch tensor of shape (h, 3), ground truth positions
-        gt_rot: torch tensor of shape (h, 3, 3), ground truth orientations
+        gt_quat: torch tensor of shape (h, 4), ground truth orientations (quaternions)
         vars_seq: numpy array of shape (h,), variance at each step
     """
-    assert traj_pos.ndim == 2 and traj_pos.shape[1] == 3, f"Expected traj_pos shape (T,3), got {traj_pos.shape}!"
-    assert traj_rot.ndim == 3 and traj_rot.shape[1:] == (3, 3), f"Expected traj_rot shape (T,3,3), got {traj_rot.shape}!"
-    assert start_t >= k, f"start_t={start_t} must be >= {k}!"
+    assert traj_pos.ndim == 2 and traj_pos.shape[1] == 3, f"Expected traj_pos shape (T,3), got {traj_pos.shape}"
+    assert traj_quat.ndim == 2 and traj_quat.shape[1] == 4, f"Expected traj_quat shape (T,4), got {traj_quat.shape}"
+    assert start_t >= k, f"Expected start_t >= k, got start_t={start_t}, k={k}"
+
     R_ref_probe = torch.tensor(R_ref_probe, dtype=torch.float32) if R_ref_probe is not None else None
 
     global_origin = traj_pos[0]
 
     cur_pos = traj_pos[start_t].clone()
-    cur_R = traj_rot[start_t].clone()
+    cur_q = traj_quat[start_t].clone()
 
     hist_pos = traj_pos[start_t-k+1:start_t+1].clone()
     hist_del = (traj_pos[1:] - traj_pos[:-1])[start_t-k:start_t].clone()
 
     preds_pos = []
-    preds_rot = []
+    preds_quat = []
     vars_seq = []
 
     for _ in range(h):
-        # Build input x_pos
+        # Input feature construction
         if input_type == 'delta':
             x_pos = hist_del.reshape(1, -1)
 
@@ -247,7 +249,7 @@ def rollout_reference_6d(
         elif input_type == 'spherical+delta':
             sph = spherical_feat_from_xyz_torch(hist_pos, global_origin)
             x_pos = torch.cat([sph.reshape(-1), hist_del.reshape(-1)], dim=0).reshape(1, -1)
-        
+
         elif input_type == 'dir':
             dir_feat = direction_feat_from_xyz_torch(hist_pos, global_origin)
             x_pos = dir_feat.reshape(1, -1)
@@ -260,40 +262,61 @@ def rollout_reference_6d(
         y_pred = torch.tensor(y_pred, dtype=torch.float32)[0]
         vars_seq.append(var)
 
+        # Output integration
         if output_type == 'delta':
             delta_world = y_pred[:3]
             next_pos = cur_pos + delta_world
 
-            omega_b = y_pred[3:]
-            R_delta = so3_exp(omega_b)
+            dq = y_pred[3:]
+
+            # Ensure shortest representation
+            if dq[0] < 0:
+                dq = -dq
+            dq = quat_normalize(dq)
+
+            # Transform delta to probe frame
             if R_ref_probe is not None:
-                R_delta = R_ref_probe @ R_delta @ R_ref_probe.T
-            next_R = R_delta @ cur_R
+                q_ref_probe = torch.tensor(rotmat_to_quat(R_ref_probe), dtype=torch.float32)
+
+                dq = quat_mul(quat_mul(q_ref_probe, dq), quat_inv(q_ref_probe))
+
+                dq = quat_normalize(dq)
+
+            # Apply delta (body frame)
+            next_q = quat_mul(dq, cur_q)
+            next_q = quat_normalize(next_q)
 
         elif output_type == 'absolute':
             next_pos = y_pred[:3]
-            next_R = R_ref_probe @ y_pred[3:].reshape(3, 3) if R_ref_probe is not None else y_pred[3:].reshape(3, 3)
+            next_q = quat_normalize(y_pred[3:])
+
+            if R_ref_probe is not None:
+                q_ref_probe = torch.tensor(rotmat_to_quat(R_ref_probe), dtype=torch.float32)
+
+                next_q = quat_mul(q_ref_probe, next_q)
+
+                next_q = quat_normalize(next_q)
 
             delta_world = next_pos - cur_pos
 
         else:
             raise ValueError(f"Unsupported output_type: {output_type}")
-        
-        # Save prediction
-        preds_pos.append(next_pos)
-        preds_rot.append(next_R)
 
-        # Update history
+        # Save predictions
+        preds_pos.append(next_pos)
+        preds_quat.append(next_q)
+
+        # Update history for next step
         hist_pos = torch.cat([hist_pos[1:], next_pos.unsqueeze(0)], dim=0)
         hist_del = torch.cat([hist_del[1:], delta_world.unsqueeze(0)], dim=0)
 
         cur_pos = next_pos
-        cur_R = next_R
+        cur_q = next_q
 
     preds_pos = torch.stack(preds_pos, dim=0)
-    preds_rot = torch.stack(preds_rot, dim=0)
+    preds_quat = torch.stack(preds_quat, dim=0)
 
     gt_pos = traj_pos[start_t+1:start_t+1+h]
-    gt_rot = traj_rot[start_t+1:start_t+1+h]
+    gt_quat = traj_quat[start_t+1:start_t+1+h]
 
-    return preds_pos, preds_rot, gt_pos, gt_rot, np.array(vars_seq)
+    return preds_pos, preds_quat, gt_pos, gt_quat, np.array(vars_seq)
