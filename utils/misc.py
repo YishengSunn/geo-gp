@@ -1,5 +1,6 @@
 import numpy as np
 
+from utils.quaternion import quat_mul, quat_inv, quat_normalize, quat_log, quat_exp
 from utils.so3 import so3_log, so3_exp
 
 
@@ -64,7 +65,7 @@ def torch_to_np(x):
 # Smoothing helpers (post-processing)
 # ============================================================
 
-def moving_average_centered(arr, win):
+def moving_average_centered_pos(arr, win):
     """
     Centered moving average smoothing along time axis (axis=0).
 
@@ -99,13 +100,51 @@ def moving_average_centered(arr, win):
         
     return out
 
+def moving_average_centered_orient(arr, win):
+    """
+    Centered moving average smoothing along time axis (axis=0).
+
+    Args:
+        arr: (N, d) array-like
+        win: int, window size (odd preferred)
+
+    Returns:
+        out: (N, d) smoothed array
+    """
+    arr = np.asarray(arr, dtype=np.float64)
+
+    if arr.ndim == 1:
+        arr = arr[:, None]
+
+    win = int(win)
+    if win < 3:
+        return arr
+    if win % 2 == 0:
+        win += 1
+
+    pad = win // 2
+    N, D = arr.shape
+
+    if N <= win:
+        return arr.copy()
+
+    # Reflect padding along time axis
+    kernel = np.ones(win, dtype=np.float64) / float(win)
+    out = arr.copy()
+
+    for d in range(D):
+        smoothed = np.convolve(arr[:, d], kernel, mode='valid')
+        out[pad:N-pad, d] = smoothed
+        
+    return out
+
 def moving_average_centered_6d(arr, win):
     """
     Centered moving average smoothing along time axis (axis=0).
 
     Supports:
-        - (N, d) Euclidean features (position, spherical, etc.)
-        - (N, 3, 3) rotation matrices (SO(3)) via log-exp smoothing
+    - (N, d) Euclidean features (position, spherical, etc.)
+    - (N, 4) quaternions via log-exp smoothing
 
     Args:
         arr: array-like
@@ -116,20 +155,31 @@ def moving_average_centered_6d(arr, win):
     """
     arr = np.asarray(arr, dtype=np.float64)
 
-    # Rotation
-    if arr.ndim == 3 and arr.shape[1:] == (3, 3):
-        # Convert rotations to so(3) vectors
-        omegas = np.array([so3_log(R) for R in arr])  # (N,3)
+    # Quaternion
+    if arr.ndim == 2 and arr.shape[1] == 4:
+        # Ensure sign continuity
+        qs = arr.copy()
+        for i in range(1, len(qs)):
+            if np.dot(qs[i-1], qs[i]) < 0:
+                qs[i] = -qs[i]
+
+        # Log map
+        omegas = np.array([quat_log(q) for q in qs])
 
         # Smooth in R^3
-        omegas_s = moving_average_centered(omegas, win)
+        omegas_s = moving_average_centered_orient(omegas, win)
 
-        # Map back to SO(3)
-        R_s = np.array([so3_exp(w) for w in omegas_s])
-        return R_s
-    
+        # Exp map back
+        qs_s = np.array([quat_exp(w) for w in omegas_s])
+
+        # Normalize
+        qs_s = np.array([quat_normalize(q) for q in qs_s])
+
+        return qs_s
+
+    # Euclidean
     else:
-        return moving_average_centered(arr, win)
+        return moving_average_centered_pos(arr, win)
 
 def smooth_prediction_by_velocity(
     probe: np.ndarray,
@@ -188,9 +238,9 @@ def smooth_prediction_by_velocity(
 
 def smooth_prediction_by_twist_6d(
     probe_pos: np.ndarray,
-    probe_rot: np.ndarray,
+    probe_quat: np.ndarray,
     pred_pos: np.ndarray,
-    pred_rot: np.ndarray,
+    pred_quat: np.ndarray,
     *,
     win: int = 9,
     blend_first_step_pos: float = 0.8,
@@ -198,18 +248,17 @@ def smooth_prediction_by_twist_6d(
     eps: float = 1e-12,
 ):
     """
-    Smooth 6D predicted trajectory by smoothing per-step twist in WORLD/PROBE frame:
-      - translation part: smooth Δp (world-frame)
-      - rotation part: smooth ω where Exp(ω) = R_{t}^T R_{t+1}  (body-frame incremental rotation)
-
-    This keeps continuity w.r.t. the last probe pose and blends the first step to preserve
-    the exiting direction (both translation and rotation).
+    Smooth 6D predicted trajectory by smoothing per-step twist in WORLD/PROBE frame, using quaternions for rotation:
+        - translation part: smooth Δp (world-frame)
+        - rotation part: smooth ω where Exp(ω) = quat_inv(q_{t}) * q_{t+1}  (body-frame incremental rotation)
+    
+    This keeps continuity w.r.t. the last probe pose and blends the first step to preserve the exiting direction (both translation and rotation).
 
     Args:
         probe_pos: (Np, 3) probe positions up to current time
-        probe_rot: (Np, 3, 3) probe rotations up to current time
-        pred_pos:  (Hp, 3) predicted future positions (starting AFTER probe end)
-        pred_rot:  (Hp, 3, 3) predicted future rotations (starting AFTER probe end)
+        probe_quat: (Np, 4) probe rotations as quaternions up to current time
+        pred_pos: (Hp, 3) predicted future positions (starting after probe end)
+        pred_quat: (Hp, 4) predicted future rotations as quaternions (starting after probe end)
         win: centered moving-average window (odd preferred)
         blend_first_step_pos: blend factor for first Δp
         blend_first_step_rot: blend factor for first ω
@@ -217,59 +266,76 @@ def smooth_prediction_by_twist_6d(
 
     Returns:
         pred_pos_s: (Hp, 3) smoothed predicted positions
-        pred_rot_s: (Hp, 3, 3) smoothed predicted rotations (still in SO(3))
+        pred_quat_s: (Hp, 4) smoothed predicted rotations as quaternions (still normalized)
     """
     probe_pos = np.asarray(probe_pos, dtype=np.float64)
     pred_pos  = np.asarray(pred_pos,  dtype=np.float64)
-    probe_rot = np.asarray(probe_rot, dtype=np.float64)
-    pred_rot  = np.asarray(pred_rot,  dtype=np.float64)
+    probe_quat = np.asarray(probe_quat, dtype=np.float64)
+    pred_quat  = np.asarray(pred_quat,  dtype=np.float64)
 
     Hp = pred_pos.shape[0]
-    if Hp == 0:
-        return pred_pos, pred_rot
-    if probe_pos.shape[0] < 2 or probe_rot.shape[0] < 2:
-        return pred_pos, pred_rot
 
-    # Translation: smooth Δp
+    if Hp == 0:
+        return pred_pos, pred_quat
+
+    if probe_pos.shape[0] < 2 or probe_quat.shape[0] < 2:
+        return pred_pos, pred_quat
+
+    # Translation smoothing
     p_last = probe_pos[-1]
-    full_p = np.vstack([p_last[None, :], pred_pos])  # (Hp+1, 3)
-    v = np.diff(full_p, axis=0)                      # (Hp, 3)
+    full_p = np.vstack([p_last[None, :], pred_pos])
+    v = np.diff(full_p, axis=0)
 
     v_s = moving_average_centered(v, int(win))
 
-    # Blend first step with probe's last delta
     v0_probe = probe_pos[-1] - probe_pos[-2]
     if np.linalg.norm(v0_probe) > eps:
-        v_s[0] = float(blend_first_step_pos) * v0_probe + (1.0 - float(blend_first_step_pos)) * v_s[0]
+        v_s[0] = blend_first_step_pos * v0_probe + (1.0 - blend_first_step_pos) * v_s[0]
 
     pred_pos_s = np.empty_like(pred_pos)
     cur_p = p_last.copy()
+
     for i in range(Hp):
         cur_p = cur_p + v_s[i]
         pred_pos_s[i] = cur_p
 
-    # Rotation: smooth ω from relative rotations
-    # ω_i = Log( R_{i}^T R_{i+1} )
-    R_last = probe_rot[-1]
-    full_R = np.concatenate([R_last[None, :, :], pred_rot], axis=0)  # (Hp+1, 3, 3)
+    # Rotation smoothing
+    q_last = probe_quat[-1]
+    full_q = np.vstack([q_last[None, :], pred_quat])
 
-    omegas = np.empty((Hp, 3), dtype=np.float64)
+    # Ensure quaternion continuity
+    for i in range(1, len(full_q)):
+        if np.dot(full_q[i-1], full_q[i]) < 0:
+            full_q[i] = -full_q[i]
+
+    omegas = np.empty((Hp, 3))
+
     for i in range(Hp):
-        dR = full_R[i].T @ full_R[i+1]
-        omegas[i] = so3_log(dR)
+        dq = quat_mul(quat_inv(full_q[i]), full_q[i+1])
+        omegas[i] = quat_log(dq)
 
     omegas_s = moving_average_centered(omegas, int(win))
 
-    # Blend first step with probe's last angular increment
-    dR_probe = probe_rot[-2].T @ probe_rot[-1]
-    omega0_probe = so3_log(dR_probe)
+    # Blend first rotation step
+    dq_probe = quat_mul(quat_inv(probe_quat[-2]), probe_quat[-1])
+    omega0_probe = quat_log(dq_probe)
+
     if np.linalg.norm(omega0_probe) > eps:
-        omegas_s[0] = float(blend_first_step_rot) * omega0_probe + (1.0 - float(blend_first_step_rot)) * omegas_s[0]
+        omegas_s[0] = blend_first_step_rot * omega0_probe + (1.0 - blend_first_step_rot) * omegas_s[0]
 
-    pred_rot_s = np.empty_like(pred_rot)
-    cur_R = R_last.copy()
+    pred_quat_s = np.empty_like(pred_quat)
+    cur_q = q_last.copy()
+
     for i in range(Hp):
-        cur_R = cur_R @ so3_exp(omegas_s[i])
-        pred_rot_s[i] = cur_R
+        dq = quat_exp(omegas_s[i])
 
-    return pred_pos_s, pred_rot_s
+        # Shortest representation
+        if dq[0] < 0:
+            dq = -dq
+
+        cur_q = quat_mul(cur_q, dq)
+        cur_q = quat_normalize(cur_q)
+
+        pred_quat_s[i] = cur_q
+
+    return pred_pos_s, pred_quat_s
