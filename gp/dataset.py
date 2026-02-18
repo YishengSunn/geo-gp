@@ -5,6 +5,7 @@ from geometry.features import (
     spherical_feat_from_xyz_torch, 
     direction_feat_from_xyz_torch
 )
+from utils.quaternion import quat_mul, quat_inv
 
 
 def build_dataset_3d(traj, k, input_type='delta', output_type='delta'):
@@ -79,26 +80,30 @@ def build_dataset_3d(traj, k, input_type='delta', output_type='delta'):
 
     return torch.stack(Xs), torch.stack(Ys)
 
-def build_dataset_6d(traj_pos: torch.Tensor,
-                     traj_rot: torch.Tensor,
-                     k: int,
-                     input_type: str = 'spherical',
-                     output_type: str = 'delta'):
+def build_dataset_6d(
+    traj_pos: torch.Tensor,
+    traj_quat: torch.Tensor,
+    k: int,
+    input_type: str = 'spherical',
+    output_type: str = 'delta'
+):
     """
     Build 6D dataset from trajectory with specified input and output types.
-
+    
     Args:
         traj_pos: torch tensor of shape (T, 3)
-        traj_rot: torch tensor of shape (T, 3, 3)
+        traj_quat: torch tensor of shape (T, 4) - quaternions
         k: history length
         input_type: str, input feature type ('pos', 'delta', 'pos+delta', 'spherical', 'spherical+delta', 'dir')
         output_type: str, output type ('delta' or 'absolute')
 
     Returns:
         Xs: torch tensor of shape (N, D_in)
-        Ys: torch tensor of shape (N, 6)
+        Ys: torch tensor of shape (N, D_out)
     """
-    assert traj_pos.shape[0] == traj_rot.shape[0], "[Dataset] Position and rotation trajectories must have the same length!"
+    assert traj_pos.shape[0] == traj_quat.shape[0], \
+        "[Dataset] Position and quaternion trajectories must match!"
+
     T = traj_pos.shape[0]
 
     global_origin = traj_pos[0]
@@ -138,24 +143,27 @@ def build_dataset_6d(traj_pos: torch.Tensor,
             Xs.append(dir_feat)
 
         else:
-            raise ValueError(f"Unsupported input_type for 6D: {input_type}")
+            raise ValueError(f"Unsupported input_type: {input_type}")
 
         # Output features
         if output_type == 'delta':
-            R_t = traj_rot[i]
-            R_next = traj_rot[i+1]
+            q_t = traj_quat[i]
+            q_next = traj_quat[i+1]
 
-            # Angular velocity in body frame
-            dR = R_t.T @ R_next
-            omega_b = so3_log(dR)
+            # Relative rotation in body frame
+            dq = quat_mul(quat_inv(q_t), q_next)
 
-            Ys.append(torch.cat([deltas[i], omega_b], dim=0))
+            # Ensure shortest representation
+            if dq[0] < 0:
+                dq = -dq
+
+            Ys.append(torch.cat([deltas[i], dq], dim=0))
 
         elif output_type == 'absolute':
-            Ys.append(torch.cat([traj_pos[i+1], traj_rot[i+1].reshape(-1)], dim=0))
+            Ys.append(torch.cat([traj_pos[i+1], traj_quat[i+1]], dim=0))
 
         else:
-            raise ValueError(f"Unsupported output_type for 6D: {output_type}")
+            raise ValueError(f"Unsupported output_type: {output_type}")
 
     return torch.stack(Xs), torch.stack(Ys)
 
