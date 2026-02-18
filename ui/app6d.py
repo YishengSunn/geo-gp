@@ -12,9 +12,10 @@ from gp.dataset import build_dataset_3d, build_dataset_6d, time_split
 from gp.model import train_gp, rollout_reference_3d, rollout_reference_6d
 from ui.handlers6d import on_press, on_move, on_release, on_key
 from utils.misc import (
-    moving_average_centered, moving_average_centered_6d, 
+    moving_average_centered_pos, moving_average_centered_6d, 
     smooth_prediction_by_velocity, smooth_prediction_by_twist_6d
 )
+from utils.quaternion import quat_to_rotmat
 
 
 class DrawApp6D:
@@ -32,13 +33,13 @@ class DrawApp6D:
         # Data buffers
         self.ref_raw = []     # list of xyz
         self.probe_raw = []   # list of xyz
-        self.ref_rot_raw = None
-        self.probe_rot_raw = None
+        self.ref_quat_raw = None
+        self.probe_quat_raw = None
 
         self.ref_eq = None    # np.ndarray (N,3) resampled
         self.probe_eq = None  # np.ndarray (M,3) resampled
-        self.ref_rot_eq = None
-        self.probe_rot_eq = None
+        self.ref_quat_eq = None
+        self.probe_quat_eq = None
 
         # Model / alignment / prediction
         self.model_info = None
@@ -48,7 +49,7 @@ class DrawApp6D:
 
         self.gt = None               # np.ndarray (H,3)
         self.preds = None            # np.ndarray (H,3)
-        self.preds_rot = None
+        self.preds_quat = None
         self.probe_goal = None       # np.ndarray (3,)
         self.goal_stop_eps = 0.05    # Stop if within this distance to goal
         self.rollout_horizon = 2000  # Max steps to rollout
@@ -126,7 +127,7 @@ class DrawApp6D:
             return
         
         if self.smooth_enabled:
-            self.ref_eq = moving_average_centered(self.ref_eq, self.smooth_win)
+            self.ref_eq = moving_average_centered_pos(self.ref_eq, self.smooth_win)
         ref_torch = torch.tensor(self.ref_eq, dtype=torch.float32)
 
         X, Y = build_dataset_3d(ref_torch, k, input_type=input_type, output_type=output_type)
@@ -151,7 +152,7 @@ class DrawApp6D:
         print()
 
     def train_reference_6d(self, *, k=K_HIST, input_type="spherical", output_type="delta"):
-        self.ref_eq, self.ref_rot_eq = resample_trajectory_6d_equal_dt(self.ref_raw, self.ref_rot_raw, 
+        self.ref_eq, self.ref_quat_eq = resample_trajectory_6d_equal_dt(self.ref_raw, self.ref_quat_raw, 
                                                                        sample_hz=SAMPLE_HZ, speed=DEFAULT_SPEED)
 
         if len(self.ref_eq) < k + 2:
@@ -161,11 +162,11 @@ class DrawApp6D:
         
         if self.smooth_enabled:
             self.ref_eq = moving_average_centered_6d(self.ref_eq, self.smooth_win)
-            self.ref_rot_eq = moving_average_centered_6d(self.ref_rot_eq, self.smooth_win)
+            self.ref_quat_eq = moving_average_centered_6d(self.ref_quat_eq, self.smooth_win)
         ref_torch = torch.tensor(self.ref_eq, dtype=torch.float32)
-        ref_rot_torch = torch.tensor(self.ref_rot_eq, dtype=torch.float32)
+        ref_quat_torch = torch.tensor(self.ref_quat_eq, dtype=torch.float32)
 
-        X, Y = build_dataset_6d(ref_torch, ref_rot_torch, k, input_type=input_type, output_type=output_type)
+        X, Y = build_dataset_6d(ref_torch, ref_quat_torch, k, input_type=input_type, output_type=output_type)
         (Xtr, Ytr), (Xte, Yte), _ = time_split(X, Y, TRAIN_RATIO)
 
         self.model_info = train_gp(
@@ -177,7 +178,7 @@ class DrawApp6D:
         for q in self.orient_quivers_ref:
             q.remove()
         self.orient_quivers_ref.clear()
-        self.draw_orientations(self.ref_eq, self.ref_rot_eq, self.orient_quivers_ref)
+        self.draw_orientations(self.ref_eq, self.ref_quat_eq, self.orient_quivers_ref)
 
         self.ref_legend.set_color("tab:green")
         self.line_ref_xy.set_color("tab:green")
@@ -188,7 +189,7 @@ class DrawApp6D:
         self.autoscale_3d()
         self.fig.canvas.draw_idle()
 
-        print(f"[Train] Done. ref_eq={self.ref_eq.shape}, ref_rot_eq={self.ref_rot_eq.shape}, X={X.shape}, Y={Y.shape}")
+        print(f"[Train] Done. ref_eq={self.ref_eq.shape}, ref_quat_eq={self.ref_quat_eq.shape}, X={X.shape}, Y={Y.shape}")
         print()
 
     def process_probe_and_predict(
@@ -225,7 +226,7 @@ class DrawApp6D:
             print()
             return
         if self.smooth_enabled:
-            self.probe_eq = moving_average_centered(self.probe_eq, self.smooth_win)
+            self.probe_eq = moving_average_centered_pos(self.probe_eq, self.smooth_win)
 
         # Update probe lines to show resampled + smoothed
         self.line_probe_yz.set_data(self.probe_eq[:, 1], self.probe_eq[:, 2])
@@ -381,15 +382,15 @@ class DrawApp6D:
         self.prediction_id += 1
         local_pred_id = self.prediction_id
 
-        if self.model_info is None or self.ref_eq is None or self.ref_rot_eq is None:
+        if self.model_info is None or self.ref_eq is None or self.ref_quat_eq is None:
             print("[Predict] Train first!")
             print()
             return
 
         # 1) Resample probe (position + orientation)
-        self.probe_eq, self.probe_rot_eq = resample_trajectory_6d_equal_dt(
+        self.probe_eq, self.probe_quat_eq = resample_trajectory_6d_equal_dt(
             self.probe_raw,
-            self.probe_rot_raw,
+            self.probe_quat_raw,
             sample_hz=SAMPLE_HZ,
             speed=DEFAULT_SPEED,
         )
@@ -401,13 +402,13 @@ class DrawApp6D:
 
         if self.smooth_enabled:
             self.probe_eq = moving_average_centered_6d(self.probe_eq, self.smooth_win)
-            self.probe_rot_eq = moving_average_centered_6d(self.probe_rot_eq, self.smooth_win)
+            self.probe_quat_eq = moving_average_centered_6d(self.probe_quat_eq, self.smooth_win)
 
         # Update probe lines
         for q in self.orient_quivers_probe:
             q.remove()
         self.orient_quivers_probe.clear()
-        self.draw_orientations(self.probe_eq, self.probe_rot_eq, self.orient_quivers_probe)
+        self.draw_orientations(self.probe_eq, self.probe_quat_eq, self.orient_quivers_probe)
 
         self.line_probe_yz.set_data(self.probe_eq[:, 1], self.probe_eq[:, 2])
         self.line_probe_3d.set_data(self.probe_eq[:, 0], self.probe_eq[:, 1])
@@ -433,14 +434,14 @@ class DrawApp6D:
         max_retries = 5
 
         self.preds = None
-        self.preds_rot = None
+        self.preds_quat = None
 
         for attempt in range(max_retries):
             cur_pos = probe_in_ref.copy()
-            cur_rot = self.probe_rot_eq.copy()[:cur_pos.shape[0]]
+            cur_quat = self.probe_quat_eq.copy()[:cur_pos.shape[0]]
 
             preds_world_pos = []
-            preds_world_rot = []
+            preds_world_quat = []
             failed = False
 
             for step in range(self.rollout_horizon):
@@ -449,10 +450,10 @@ class DrawApp6D:
                     print()
                     return
                 
-                preds_ref_pos, preds_ref_rot, _, _, vars_ref = rollout_reference_6d(
+                preds_ref_pos, preds_quat, _, _, vars_ref = rollout_reference_6d(
                     self.model_info,
                     torch.tensor(cur_pos, dtype=torch.float32),
-                    torch.tensor(cur_rot, dtype=torch.float32),
+                    torch.tensor(cur_quat, dtype=torch.float32),
                     start_t=cur_pos.shape[0] - 1,
                     h=1,
                     k=k,
@@ -464,15 +465,15 @@ class DrawApp6D:
                 next_ref_pos = preds_ref_pos[-1].numpy()
 
                 next_world_pos = self.s * (next_ref_pos @ self.R.T) + self.t
-                next_world_rot = preds_ref_rot[-1].numpy()
+                next_world_quat = preds_quat[-1].numpy()
 
                 preds_world_pos.append(next_world_pos)
-                preds_world_rot.append(next_world_rot)
+                preds_world_quat.append(next_world_quat)
 
                 # Update history in ref frame
                 cur_pos = np.vstack([cur_pos, next_ref_pos])
-                cur_rot = np.vstack([cur_rot, next_world_rot[None, :, :]])
-
+                cur_quat = np.vstack([cur_quat, next_world_quat[None, :]])
+                
                 # Truncation logic
                 if self.probe_goal is not None:
                     d = np.linalg.norm(next_world_pos - self.probe_goal)
@@ -490,7 +491,7 @@ class DrawApp6D:
 
             if not failed:
                 preds_world_pos = np.asarray(preds_world_pos)
-                preds_world_rot = np.asarray(preds_world_rot)
+                preds_world_quat = np.asarray(preds_world_quat)
 
                 # Robust start selection near probe end
                 probe_end = self.probe_eq[-1]
@@ -516,7 +517,7 @@ class DrawApp6D:
                             continue
 
                     self.preds = preds_world_pos[i_start:]
-                    self.preds_rot = preds_world_rot[i_start:]
+                    self.preds_quat = preds_world_quat[i_start:]
                     break
 
             # Drop tail and retry
@@ -532,11 +533,11 @@ class DrawApp6D:
 
         # 5) Smooth prediction by twist
         if self.smooth_enabled and output_type == 'delta':
-            self.preds, self.preds_rot = smooth_prediction_by_twist_6d(
+            self.preds, self.preds_quat = smooth_prediction_by_twist_6d(
                 probe_pos=self.probe_eq,
-                probe_rot=self.probe_rot_eq,
+                probe_quat=self.probe_quat_eq,
                 pred_pos=self.preds,
-                pred_rot=self.preds_rot,
+                pred_quat=self.preds_quat,
                 win=self.smooth_win,
             )
 
@@ -568,8 +569,8 @@ class DrawApp6D:
         self.line_ref_3d.set_data(P[:, 0], P[:, 1])
         self.line_ref_3d.set_3d_properties(P[:, 2])
 
-        if self.ref_rot_raw is not None and len(P) == len(self.ref_rot_raw):
-            self.draw_orientations(P, self.ref_rot_raw, self.orient_quivers_ref)
+        if self.ref_quat_raw is not None and len(P) == len(self.ref_quat_raw):
+            self.draw_orientations(P, self.ref_quat_raw, self.orient_quivers_ref)
         else:
             for q in self.orient_quivers_ref:
                 q.remove()
@@ -602,8 +603,8 @@ class DrawApp6D:
         self.line_probe_3d.set_data(P[:, 0], P[:, 1])
         self.line_probe_3d.set_3d_properties(P[:, 2])
 
-        if self.probe_rot_raw is not None and len(P) == len(self.probe_rot_raw):
-            self.draw_orientations(P, self.probe_rot_raw, self.orient_quivers_probe)
+        if self.probe_quat_raw is not None and len(P) == len(self.probe_quat_raw):
+            self.draw_orientations(P, self.probe_quat_raw, self.orient_quivers_probe)
         else:
             for q in self.orient_quivers_probe:
                 q.remove()
@@ -633,8 +634,8 @@ class DrawApp6D:
         self.line_pred_3d.set_data(P[:, 0], P[:, 1])
         self.line_pred_3d.set_3d_properties(P[:, 2])
 
-        if self.preds_rot is not None and len(self.preds_rot) == len(self.preds):
-            self.draw_orientations(self.preds, self.preds_rot, self.orient_quivers_pred)
+        if self.preds_quat is not None and len(self.preds_quat) == len(self.preds):
+            self.draw_orientations(self.preds, self.preds_quat, self.orient_quivers_pred)
         else:
             for q in self.orient_quivers_pred:
                 q.remove()
@@ -643,13 +644,13 @@ class DrawApp6D:
         self.autoscale_3d()
         self.fig.canvas.draw_idle()
 
-    def draw_orientations(self, positions, rotations, quiver_store, scale=0.1):
+    def draw_orientations(self, positions, quaternions, quiver_store, scale=0.1):
         """
-        Draw orientation arrows in 3D using the local X, Y, Z axes of each rotation matrix.
+        Draw orientation arrows in 3D using quaternions.
 
         Args:
             positions: list or np.ndarray of shape (N,3), positions of the quivers
-            rotations: list or np.ndarray of shape (N,3,3), rotation matrices for the quivers
+            quaternions: list or np.ndarray of shape (N,4), quaternions representing orientations
             quiver_store: list, to store the created quiver objects for later removal
             scale: float, scaling factor for the quiver lengths
         """
@@ -658,14 +659,16 @@ class DrawApp6D:
             q.remove()
         quiver_store.clear()
 
-        if rotations is None:
+        if quaternions is None:
             return
 
         P = np.asarray(positions, dtype=np.float64)
-        R = np.asarray(rotations, dtype=np.float64)
+        Q = np.asarray(quaternions, dtype=np.float64)
 
-        for p, Rm in zip(P[::10], R[::10]):  # Draw sparsely
-            # Local axes from rotation matrix
+        for p, q in zip(P[::10], Q[::10]):  # Draw sparsely
+            Rm = quat_to_rotmat(q)
+
+            # Local axes
             x_dir = Rm[:, 0] * scale
             y_dir = Rm[:, 1] * scale
             z_dir = Rm[:, 2] * scale
@@ -739,9 +742,9 @@ class DrawApp6D:
 
     def clear(self):
         self.ref_raw = self.probe_raw = []
-        self.ref_rot_raw = self.probe_rot_raw = None
+        self.ref_quat_raw = self.probe_quat_raw = None
         self.ref_eq = self.probe_eq = None
-        self.ref_rot_eq = self.probe_rot_eq = None
+        self.ref_quat_eq = self.probe_quat_eq = None
         self.preds = self.gt = None
         self.model_info = None
         self.probe_goal = None
