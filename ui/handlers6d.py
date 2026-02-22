@@ -1,7 +1,7 @@
 import numpy as np
 
 from geometry.demos import (load_demo_spirals, load_demo_circles_with_orientation, 
-                            load_ref_xyz_from_csv, load_probe_xyz_from_csv
+                            load_ref_from_csv, load_probe_from_csv
 )
 
 
@@ -113,7 +113,7 @@ def on_key(app6d, event):
             app6d.process_probe_and_predict()
 
     elif key == "P":
-        load_probe_xyz_from_csv(app6d, "data/ee_trajectory_2026-02-05_17-26-40.csv")
+        load_probe_from_csv(app6d, "data/ee_trajectory_2026-02-05_17-26-40.csv")
 
     elif key == "r":
         app6d.prediction_id += 1
@@ -126,7 +126,7 @@ def on_key(app6d, event):
         print()
 
     elif key == "R":
-        load_ref_xyz_from_csv(app6d, "data/ee_trajectory_2026-02-05_17-24-52.csv")
+        load_ref_from_csv(app6d, "data/ee_trajectory_2026-02-05_17-24-52.csv")
 
     elif key == "t":
         if app6d.use_6d:
