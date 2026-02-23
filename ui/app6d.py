@@ -50,13 +50,13 @@ class DrawApp6D:
         self.preds = None            # np.ndarray (H,3)
         self.preds_rot = None
         self.probe_goal = None       # np.ndarray (3,)
-        self.goal_stop_eps = 0.05    # Stop if within this distance to goal
-        self.rollout_horizon = 2000  # Max steps to rollout
+        self.goal_stop_eps = 0.01    # Stop if within this distance to goal
+        self.rollout_horizon = 1000   # Max steps to rollout
         self.prediction_id = 0
 
         # Smoothing
         self.smooth_enabled = True
-        self.smooth_win = 10
+        self.smooth_win = 15
 
         # Drawing state
         self.drawing_ref = False
@@ -256,8 +256,8 @@ class DrawApp6D:
         # 4) Rollout in ref frame
         self.preds = None
 
-        mse_thresh = 0.01
-        drop_k = 5
+        mse_thresh = 0.0001
+        drop_k = 10
         max_retries = 5
 
         for attempt in range(max_retries):
@@ -299,7 +299,7 @@ class DrawApp6D:
 
             # Geometric drift check
             mse_full = geom_mse(cur_hist, self.ref_eq, min(len(cur_hist), len(self.ref_eq)))
-            print(f"[GeomCheck] full mse = {mse_full:.4f}")
+            print(f"[GeomCheck] full mse = {mse_full:.6f}")
 
             if mse_full > mse_thresh:
                 print("[Recover] Geometric drift detected, retry...")
