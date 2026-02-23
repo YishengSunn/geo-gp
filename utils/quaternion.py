@@ -109,15 +109,29 @@ def quat_mul(q1, q2):
     Returns:
         q: (4,) product quaternion
     """
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
+    is_torch = isinstance(q1, torch.Tensor)
 
-    return torch.tensor([
-        w1*w2 - x1*x2 - y1*y2 - z1*z2,
-        w1*x2 + x1*w2 + y1*z2 - z1*y2,
-        w1*y2 - x1*z2 + y1*w2 + z1*x2,
-        w1*z2 + x1*y2 - y1*x2 + z1*w2
-    ], dtype=q1.dtype, device=q1.device)
+    if is_torch:
+        w1, x1, y1, z1 = q1
+        w2, x2, y2, z2 = q2
+
+        return torch.tensor([
+            w1*w2 - x1*x2 - y1*y2 - z1*z2,
+            w1*x2 + x1*w2 + y1*z2 - z1*y2,
+            w1*y2 - x1*z2 + y1*w2 + z1*x2,
+            w1*z2 + x1*y2 - y1*x2 + z1*w2
+        ], dtype=q1.dtype, device=q1.device)
+
+    else:
+        w1, x1, y1, z1 = q1
+        w2, x2, y2, z2 = q2
+
+        return np.array([
+            w1*w2 - x1*x2 - y1*y2 - z1*z2,
+            w1*x2 + x1*w2 + y1*z2 - z1*y2,
+            w1*y2 - x1*z2 + y1*w2 + z1*x2,
+            w1*z2 + x1*y2 - y1*x2 + z1*w2
+        ], dtype=q1.dtype)
 
 def quat_inv(q):
     """
@@ -129,8 +143,15 @@ def quat_inv(q):
     Returns:
         q_inv: (4,) inverse quaternion [w, -x, -y, -z]
     """
-    w, x, y, z = q
-    return torch.tensor([w, -x, -y, -z], dtype=q.dtype, device=q.device)
+    is_torch = isinstance(q, torch.Tensor)
+
+    if is_torch:
+        w, x, y, z = q
+        return torch.tensor([w, -x, -y, -z], dtype=q.dtype, device=q.device)
+
+    else:
+        w, x, y, z = q
+        return np.array([w, -x, -y, -z], dtype=q.dtype)
 
 def quat_normalize(q):
     """
@@ -142,7 +163,13 @@ def quat_normalize(q):
     Returns:
         q_normalized: (4,) normalized quaternion
     """
-    return q / torch.norm(q)
+    is_torch = isinstance(q, torch.Tensor)
+
+    if is_torch:
+        return q / torch.norm(q)
+
+    else:
+        return q / np.linalg.norm(q)
 
 def quat_log(q, eps=1e-9):
     """
@@ -155,18 +182,35 @@ def quat_log(q, eps=1e-9):
     Returns:
         v: (3,) tangent vector representing the rotation
     """
-    w, x, y, z = q
-    v = torch.tensor([x, y, z], dtype=q.dtype, device=q.device)
+    is_torch = isinstance(q, torch.Tensor)
 
-    norm_v = torch.norm(v)
+    if is_torch:
+        w, x, y, z = q
+        v = torch.tensor([x, y, z], dtype=q.dtype, device=q.device)
 
-    if norm_v < eps:
-        return torch.zeros(3, dtype=q.dtype, device=q.device)
+        norm_v = torch.norm(v)
 
-    theta = 2 * torch.atan2(norm_v, w)
-    axis = v / norm_v
+        if norm_v < eps:
+            return torch.zeros(3, dtype=q.dtype, device=q.device)
 
-    return axis * theta
+        theta = 2 * torch.atan2(norm_v, w)
+        axis = v / norm_v
+
+        return axis * theta
+
+    else:
+        w, x, y, z = q
+        v = np.array([x, y, z], dtype=q.dtype)
+
+        norm_v = np.linalg.norm(v)
+
+        if norm_v < eps:
+            return np.zeros(3, dtype=q.dtype)
+
+        theta = 2 * np.arctan2(norm_v, w)
+        axis = v / norm_v
+
+        return axis * theta
 
 def quat_exp(omega, eps=1e-9):
     """
@@ -179,18 +223,35 @@ def quat_exp(omega, eps=1e-9):
     Returns:
         q: (4,) quaternion [w, x, y, z]
     """
-    theta = np.linalg.norm(omega)
+    is_torch = isinstance(omega, torch.Tensor)
 
-    if theta < eps:
-        return np.array([1.0, 0.0, 0.0, 0.0])
+    if is_torch:
+        theta = torch.norm(omega)
 
-    axis = omega / theta
-    half = theta * 0.5
+        if theta < eps:
+            return torch.tensor([1.0, 0.0, 0.0, 0.0], dtype=omega.dtype, device=omega.device)
 
-    w = np.cos(half)
-    xyz = axis * np.sin(half)
+        axis = omega / theta
+        half = theta * 0.5
 
-    return np.array([w, xyz[0], xyz[1], xyz[2]])
+        w = torch.cos(half)
+        xyz = axis * torch.sin(half)
+
+        return torch.tensor([w, xyz[0], xyz[1], xyz[2]], dtype=omega.dtype, device=omega.device)
+
+    else:
+        theta = np.linalg.norm(omega)
+
+        if theta < eps:
+            return np.array([1.0, 0.0, 0.0, 0.0])
+
+        axis = omega / theta
+        half = theta * 0.5
+
+        w = np.cos(half)
+        xyz = axis * np.sin(half)
+
+        return np.array([w, xyz[0], xyz[1], xyz[2]])
 
 def quat_slerp(q0, q1, t, eps=1e-9):
     """
