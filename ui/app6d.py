@@ -51,13 +51,13 @@ class DrawApp6D:
         self.preds = None            # np.ndarray (H,3)
         self.preds_quat = None
         self.probe_goal = None       # np.ndarray (3,)
-        self.goal_stop_eps = 0.05    # Stop if within this distance to goal
+        self.goal_stop_eps = 0.01    # Stop if within this distance to goal
         self.rollout_horizon = 2000  # Max steps to rollout
         self.prediction_id = 0
 
         # Smoothing
         self.smooth_enabled = True
-        self.smooth_win = 10
+        self.smooth_win = 15
 
         # Drawing state
         self.drawing_ref = False
@@ -257,8 +257,8 @@ class DrawApp6D:
         # 4) Rollout in ref frame
         self.preds = None
 
-        mse_thresh = 0.01
-        drop_k = 5
+        mse_thresh = 0.0001
+        drop_k = 10
         max_retries = 5
 
         for attempt in range(max_retries):
@@ -429,8 +429,8 @@ class DrawApp6D:
         self.probe_goal = self.s * (self.ref_eq[-1] @ self.R.T) + self.t
 
         # 4) Rollout in ref frame
-        mse_thresh = 0.01
-        drop_k = 5
+        mse_thresh = 0.0001
+        drop_k = 10
         max_retries = 5
 
         self.preds = None
