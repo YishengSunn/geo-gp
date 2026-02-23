@@ -1,7 +1,7 @@
 import csv
 import numpy as np
 
-from utils.quaternion import quat_between_vectors
+from utils.quaternion import quat_between_vectors, rotmat_to_quat
 
 
 def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
@@ -78,15 +78,25 @@ def load_demo_circles_with_orientation(app6d, *, T=400, r_ref=0.5, r_probe=1.0):
 
     probe_quat = []
     center = np.array([1.5, 0.0, 0.0])
+    plane_normal = np.array([1.0, 0.0, 0.0], dtype=np.float64)
 
     for p in probe_pos:
-        target_dir = center - p
-        target_dir /= np.linalg.norm(target_dir)
+        x_axis = center - p
+        x_axis /= np.linalg.norm(x_axis)
 
-        q = quat_between_vectors(np.array([1,0,0]), target_dir)
+        y_axis = plane_normal.copy()
+
+        z_axis = np.cross(x_axis, y_axis)
+        z_axis /= np.linalg.norm(z_axis)
+
+        y_axis = np.cross(z_axis, x_axis)
+        y_axis /= np.linalg.norm(y_axis)
+
+        R = np.stack([x_axis, y_axis, z_axis], axis=1)
+        q = rotmat_to_quat(R)
         probe_quat.append(q)
 
-    probe_quat = np.asarray(probe_quat)
+    probe_quat = np.asarray(probe_quat, dtype=np.float64)
 
     app6d.ref_raw = ref_pos.tolist()
     app6d.probe_raw = probe_pos.tolist()
