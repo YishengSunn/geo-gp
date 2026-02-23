@@ -618,6 +618,10 @@ class DrawApp6D:
         Update prediction trajectory lines in all views.
         """
         if self.preds is None or len(self.preds) == 0:
+            for q in self.orient_quivers_pred:
+                q.remove()
+            self.orient_quivers_pred.clear()
+
             self.line_pred_yz.set_data([], [])
             self.line_pred_3d.set_data([], [])
             self.line_pred_3d.set_3d_properties([])
@@ -644,7 +648,7 @@ class DrawApp6D:
         self.autoscale_3d()
         self.fig.canvas.draw_idle()
 
-    def draw_orientations(self, positions, quaternions, quiver_store, scale=0.1):
+    def draw_orientations(self, positions, quaternions, quiver_store, scale=0.02):
         """
         Draw orientation arrows in 3D using quaternions.
 
@@ -665,7 +669,7 @@ class DrawApp6D:
         P = np.asarray(positions, dtype=np.float64)
         Q = np.asarray(quaternions, dtype=np.float64)
 
-        for p, q in zip(P[::10], Q[::10]):  # Draw sparsely
+        for p, q in zip(P[::30], Q[::30]):  # Draw sparsely
             Rm = quat_to_rotmat(q)
 
             # Local axes
