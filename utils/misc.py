@@ -220,7 +220,7 @@ def smooth_prediction_by_velocity(
     v = np.diff(full, axis=0)  # (Hp, D)
 
     # Smooth velocities using a centered moving average
-    v_s = moving_average_centered(v, int(win))
+    v_s = moving_average_centered_pos(v, int(win))
 
     # Enforce a smooth connection direction using the probe's last delta
     v0_probe = probe[-1] - probe[-2]
@@ -286,7 +286,7 @@ def smooth_prediction_by_twist_6d(
     full_p = np.vstack([p_last[None, :], pred_pos])
     v = np.diff(full_p, axis=0)
 
-    v_s = moving_average_centered(v, int(win))
+    v_s = moving_average_centered_pos(v, int(win))
 
     v0_probe = probe_pos[-1] - probe_pos[-2]
     if np.linalg.norm(v0_probe) > eps:
@@ -314,7 +314,7 @@ def smooth_prediction_by_twist_6d(
         dq = quat_mul(quat_inv(full_q[i]), full_q[i+1])
         omegas[i] = quat_log(dq)
 
-    omegas_s = moving_average_centered(omegas, int(win))
+    omegas_s = moving_average_centered_orient(omegas, int(win))
 
     # Blend first rotation step
     dq_probe = quat_mul(quat_inv(probe_quat[-2]), probe_quat[-1])
