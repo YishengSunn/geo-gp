@@ -62,7 +62,7 @@ class DrawApp6D:
         # Drawing state
         self.drawing_ref = False
         self.drawing_probe = False
-        self.use_6d = False
+        self.use_6d = True
 
         # Build UI
         self.init_ui()
