@@ -1,3 +1,5 @@
+import csv
+import pandas as pd
 import numpy as np
 
 from utils.quaternion import quat_mul, quat_inv, quat_normalize, quat_log, quat_exp
@@ -339,3 +341,78 @@ def smooth_prediction_by_twist_6d(
         pred_quat_s[i] = cur_q
 
     return pred_pos_s, pred_quat_s
+
+# ============================================================
+# Save helpers
+# ============================================================
+
+def process_csv(input_path, output_path, freq=20, downsample=5):
+    """
+    Process raw CSV file by adding time column and downsampling.
+
+    Args:
+    - input_path: path to raw CSV file with columns [time, x, y, z, qx, qy, qz, qw]
+    - output_path: path to save processed CSV
+    - freq: frequency of the trajectory (for generating time column if not present)
+    - downsample: int, if > 1, take every N-th row for downsampling
+    """
+    df = pd.read_csv(input_path)
+
+    if downsample > 1:
+        df = df.iloc[::downsample].reset_index(drop=True)
+
+    dt = 1.0 / freq
+    df["time"] = (np.arange(len(df)) * dt).round(2)
+
+    df.to_csv(output_path, index=False)
+
+    print(f"[Process CSV] Processed CSV saved to {output_path}")
+
+def save_predictions_to_csv(
+    filepath,
+    preds,
+    preds_quat,
+    *,
+    dt=0.005,
+):
+    """
+    Save GP predicted trajectory (position + quaternion) to CSV.
+
+    Args:
+        filepath: output CSV file path
+        preds: (N, 3) predicted positions
+        preds_quat: (N, 4) predicted orientations as quaternions [w, x, y, z]
+        dt: time step between predictions (for generating timestamps)
+    """
+    if preds is None or preds_quat is None:
+        raise ValueError("preds or preds_quat is None")
+
+    P = np.asarray(preds, dtype=np.float64)
+    Q = np.asarray(preds_quat, dtype=np.float64)
+
+    assert len(P) == len(Q), f"Length mismatch: preds has {len(P)} points, preds_quat has {len(Q)} points"
+
+    N = len(P)
+
+    with open(filepath, "w", newline="") as f:
+        writer = csv.writer(f)
+
+        writer.writerow([
+            "time",
+            "x", "y", "z",
+            "qx", "qy", "qz", "qw"
+        ])
+
+        for i in range(N):
+            t = i * dt
+
+            x, y, z = P[i]
+            qw, qx, qy, qz = Q[i]
+
+            writer.writerow([
+                round(float(t), 4),
+                round(float(x), 6), round(float(y), 6), round(float(z), 6),
+                round(float(qx), 6), round(float(qy), 6), round(float(qz), 6), round(float(qw), 6)
+            ])
+
+    print(f"[Save] Predictions saved to {filepath}")
