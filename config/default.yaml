@@ -9,7 +9,7 @@ experiment:
 # =========================
 sampling:
   k_hist: 10          # Seed history length
-  sample_hz: 20       # Sample frequency for equal-dt resampling
+  sample_hz: 200      # Sample frequency for equal-dt resampling
   default_speed: 0.2  # Convert polyline length to time for equal-time sampling
 
 # =========================
