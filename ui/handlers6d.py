@@ -1,8 +1,10 @@
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 from geometry.demos import (load_demo_spirals, load_demo_circles_with_orientation, 
-                            load_ref_xyz_from_csv, load_probe_xyz_from_csv
+                            load_ref_from_csv, load_probe_from_csv
 )
+from utils.misc import process_csv, save_predictions_to_csv
 
 
 def on_press(app6d, event):
@@ -77,24 +79,6 @@ def on_key(app6d, event):
     if key == "c":
         app6d.clear()
 
-    elif key == "h":
-        app6d.smooth_enabled = not app6d.smooth_enabled
-        print(f"[UI] Smooth enabled: {app6d.smooth_enabled}")
-        print()
-
-    elif key == 'L':
-        load_demo_spirals(app6d)
-
-    elif key == "O":
-        load_demo_circles_with_orientation(app6d)
-
-    elif key == "m":
-        app6d.use_6d = not app6d.use_6d
-
-        mode_str = "6D (position + orientation)" if app6d.use_6d else "3D (position only)"
-        print(f"[UI] Switched mode -> {mode_str}")
-        print()
-
     elif key == "n":
         app6d.prediction_id += 1
         app6d.ref_raw = app6d.ref_eq = []
@@ -106,15 +90,6 @@ def on_key(app6d, event):
         print("[UI] Ready to draw a new reference.")
         print()
 
-    elif key == "p":
-        if app6d.use_6d:
-            app6d.process_probe_and_predict_6d()
-        else:
-            app6d.process_probe_and_predict()
-
-    elif key == "P":
-        load_probe_xyz_from_csv(app6d, "data/ee_trajectory_2026-02-05_17-26-40.csv")
-
     elif key == "r":
         app6d.prediction_id += 1
         app6d.probe_raw = app6d.probe_eq = []
@@ -125,14 +100,62 @@ def on_key(app6d, event):
         print("[UI] Probe reset. Ready to draw a new probe.")
         print()
 
+    elif key == "h":
+        app6d.smooth_enabled = not app6d.smooth_enabled
+        print(f"[UI] Smooth enabled: {app6d.smooth_enabled}")
+        print()
+
+    elif key == "m":
+        app6d.use_6d = not app6d.use_6d
+
+        mode_str = "6D (position + orientation)" if app6d.use_6d else "3D (position only)"
+        print(f"[UI] Switched mode -> {mode_str}")
+        print()
+
+    elif key == 'L':
+        load_demo_spirals(app6d)
+
+    elif key == "O":
+        load_demo_circles_with_orientation(app6d)
+
     elif key == "R":
-        load_ref_xyz_from_csv(app6d, "data/ee_trajectory_2026-02-05_17-24-52.csv")
+        load_ref_from_csv(app6d, "data/02-16-1/refs_1/ee_trajectory_2026-02-16_15-01-33.csv")
+
+    elif key == "P":
+        load_probe_from_csv(app6d, "data/02-16-1/probes_1/ee_trajectory_2026-02-16_15-03-57.csv")
 
     elif key == "t":
         if app6d.use_6d:
             app6d.train_reference_6d()
         else:
             app6d.train_reference()
+
+    elif key == "p":
+        if app6d.use_6d:
+            app6d.process_probe_and_predict_6d()
+        else:
+            app6d.process_probe_and_predict()
+
+    elif key == "s":
+        if app6d.preds is not None and app6d.preds_rot is not None:
+            file_path = "data/02-16-1/prediction_2026-02-16_15-03-57.csv"
+
+            quat_xyzw = R.from_matrix(app6d.preds_rot).as_quat()
+            preds_quat = np.stack([
+                quat_xyzw[:, 3],
+                quat_xyzw[:, 0],
+                quat_xyzw[:, 1],
+                quat_xyzw[:, 2]
+            ], axis=1)
+
+            save_predictions_to_csv(file_path, app6d.preds, preds_quat, dt=0.05)
+            print(f"[UI] Predictions saved to {file_path}")
+            print()
+
+    elif key == ' ':
+        process_csv("data/02-16-1/refs_2/ee_trajectory_2026-02-16_15-33-07.csv", 
+                    "data/02-16-1/refs_2/ref_2026-02-16_15-33-07.csv",
+                    freq=20, downsample=1)
 
 def xy_to_xyz(app6d, event):
     """
