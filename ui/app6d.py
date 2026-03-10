@@ -12,8 +12,9 @@ from gp.dataset import build_dataset_3d, build_dataset_6d, time_split
 from gp.model import train_gp, rollout_reference_3d, rollout_reference_6d
 from ui.handlers6d import on_press, on_move, on_release, on_key
 from utils.misc import (
-    moving_average_centered, moving_average_centered_6d, 
-    smooth_prediction_by_velocity, smooth_prediction_by_twist_6d
+    moving_average_centered_pos, moving_average_centered_6d, 
+    smooth_prediction_by_velocity, smooth_prediction_by_twist_6d,
+    plot_orientation_error
 )
 
 
@@ -61,7 +62,7 @@ class DrawApp6D:
         # Drawing state
         self.drawing_ref = False
         self.drawing_probe = False
-        self.use_6d = False
+        self.use_6d = True
 
         # Build UI
         self.init_ui()
@@ -126,7 +127,7 @@ class DrawApp6D:
             return
         
         if self.smooth_enabled:
-            self.ref_eq = moving_average_centered(self.ref_eq, self.smooth_win)
+            self.ref_eq = moving_average_centered_pos(self.ref_eq, self.smooth_win)
         ref_torch = torch.tensor(self.ref_eq, dtype=torch.float32)
 
         X, Y = build_dataset_3d(ref_torch, k, input_type=input_type, output_type=output_type)
@@ -225,7 +226,7 @@ class DrawApp6D:
             print()
             return
         if self.smooth_enabled:
-            self.probe_eq = moving_average_centered(self.probe_eq, self.smooth_win)
+            self.probe_eq = moving_average_centered_pos(self.probe_eq, self.smooth_win)
 
         # Update probe lines to show resampled + smoothed
         self.line_probe_yz.set_data(self.probe_eq[:, 1], self.probe_eq[:, 2])
@@ -415,12 +416,12 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
         # 2) Alignment
-        R, s, t = estimate_rotation_scale_3d_search_by_count(
+        R, s, t, j_end = estimate_rotation_scale_3d_search_by_count(
             self.ref_eq,
             self.probe_eq,
             margin_pts=300,
             step=10,
-        )[:3]
+        )[:4]
         self.R, self.s, self.t = R, s, t
 
         # 3) Transform probe into ref frame
@@ -541,6 +542,7 @@ class DrawApp6D:
             )
 
         self.update_pred_lines()
+        plot_orientation_error(self.ref_rot_eq, self.preds_rot, j_end, self.R)
         print(f"[Predict] Done. preds={self.preds.shape}")
         print()
 
