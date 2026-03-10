@@ -13,7 +13,8 @@ from gp.model import train_gp, rollout_reference_3d, rollout_reference_6d
 from ui.handlers6d import on_press, on_move, on_release, on_key
 from utils.misc import (
     moving_average_centered_pos, moving_average_centered_6d, 
-    smooth_prediction_by_velocity, smooth_prediction_by_twist_6d
+    smooth_prediction_by_velocity, smooth_prediction_by_twist_6d,
+    plot_orientation_error
 )
 from utils.quaternion import quat_to_rotmat
 
@@ -416,12 +417,12 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
         # 2) Alignment
-        R, s, t = estimate_rotation_scale_3d_search_by_count(
+        R, s, t, j_end = estimate_rotation_scale_3d_search_by_count(
             self.ref_eq,
             self.probe_eq,
             margin_pts=300,
             step=10,
-        )[:3]
+        )[:4]
         self.R, self.s, self.t = R, s, t
 
         # 3) Transform probe into ref frame
@@ -542,6 +543,7 @@ class DrawApp6D:
             )
 
         self.update_pred_lines()
+        plot_orientation_error(self.ref_quat_eq, self.preds_quat, j_end, self.R)
         print(f"[Predict] Done. preds={self.preds.shape}")
         print()
 
