@@ -1,6 +1,8 @@
+import csv
 import numpy as np
-
-from utils.so3 import so3_log, so3_exp
+import pandas as pd
+from matplotlib import pyplot as plt
+from scipy.spatial.transform import Rotation as R, Slerp
 
 
 # ============================================================
@@ -61,10 +63,88 @@ def torch_to_np(x):
     return x.detach().cpu().numpy()
 
 # ============================================================
+# Quaternion helpers
+# ============================================================
+
+def normalize_quaternion(q, eps=1e-12):
+    """
+    Normalize a quaternion to unit length, with numerical stability.
+
+    Args:
+        q: array-like of shape (4,) in [w, x, y, z] format
+        eps: small value to prevent division by zero
+
+    Returns:
+        normalized quaternion of shape (4,) in [w, x, y, z] format
+    """
+    q = np.asarray(q, dtype=np.float64)
+    n = np.linalg.norm(q)
+    if n < eps:
+        return np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    return q / n
+
+def enforce_quaternion_hemisphere(quats):
+    """
+    Enforce quaternions to be in the same hemisphere to ensure smooth interpolation.
+    This is done by iterating through the sequence and flipping the sign of any quaternion
+    that has a negative dot product with the previous one.
+
+    Args:
+        quats: (N, 4) array of quaternions in [w, x, y, z] format
+
+    Returns:
+        (N, 4) array of quaternions with consistent hemisphere
+    """
+    quats = np.asarray(quats, dtype=np.float64).copy()
+    if quats.ndim != 2 or quats.shape[1] != 4:
+        raise ValueError(f"Expected quaternion array of shape (N, 4), got {quats.shape}")
+
+    if quats.shape[0] == 0:
+        return quats
+
+    quats[0] = normalize_quaternion(quats[0])
+    for i in range(1, quats.shape[0]):
+        quats[i] = normalize_quaternion(quats[i])
+        if np.dot(quats[i-1], quats[i]) < 0.0:
+            quats[i] = -quats[i]
+
+    return quats
+
+def rotation_matrices_to_quat_wxyz(rot_mats):
+    """
+    Convert rotation matrices to quaternions in [w, x, y, z] format.
+
+    Args:
+        rot_mats: (N, 3, 3) array of rotation matrices
+
+    Returns:
+        (N, 4) array of quaternions in [w, x, y, z] format
+    """
+    rot_mats = np.asarray(rot_mats, dtype=np.float64)
+    q_xyzw = R.from_matrix(rot_mats).as_quat()
+    q_wxyz = np.stack([q_xyzw[:, 3], q_xyzw[:, 0], q_xyzw[:, 1], q_xyzw[:, 2]], axis=1)
+    return enforce_quaternion_hemisphere(q_wxyz)
+
+def quat_wxyz_to_rotation_matrices(quats):
+    """
+    Convert quaternions in [w, x, y, z] format to rotation matrices.
+
+    Args:
+        quats: (N, 4) array of quaternions in [w, x, y, z] format
+
+    Returns:
+        (N, 3, 3) array of rotation matrices
+    """
+    quats = np.asarray(quats, dtype=np.float64)
+    q_xyzw = np.stack([quats[:, 1], quats[:, 2], quats[:, 3], quats[:, 0]], axis=1)
+    q_xyzw = np.array([normalize_quaternion(q) for q in q_xyzw])
+    return R.from_quat(q_xyzw).as_matrix()
+
+# ============================================================
 # Smoothing helpers (post-processing)
 # ============================================================
 
-def moving_average_centered(arr, win):
+def moving_average_centered_pos(arr, win):
     """
     Centered moving average smoothing along time axis (axis=0).
 
@@ -99,13 +179,51 @@ def moving_average_centered(arr, win):
         
     return out
 
+def moving_average_centered_quat(quats, win):
+    """
+    Centered moving average smoothing for quaternions, with hemisphere enforcement.
+
+    Args:
+        quats: (N, 4) array of quaternions in [w, x, y, z] format
+        win: int, window size (odd preferred)
+
+    Returns:
+        (N, 4) array of smoothed quaternions in [w, x, y, z] format
+    """
+    quats = enforce_quaternion_hemisphere(quats)
+    win = int(win)
+
+    if win < 3 or quats.shape[0] <= 1:
+        return quats.copy()
+    if win % 2 == 0:
+        win += 1
+
+    pad = win // 2
+    N = quats.shape[0]
+    out = np.empty_like(quats)
+
+    for i in range(N):
+        lo = max(0, i - pad)
+        hi = min(N, i + pad + 1)
+        local = quats[lo:hi].copy()
+        anchor = quats[i]
+
+        for j in range(local.shape[0]):
+            if np.dot(anchor, local[j]) < 0.0:
+                local[j] = -local[j]
+
+        q_avg = local.mean(axis=0)
+        out[i] = normalize_quaternion(q_avg)
+
+    return enforce_quaternion_hemisphere(out)
+
 def moving_average_centered_6d(arr, win):
     """
     Centered moving average smoothing along time axis (axis=0).
 
     Supports:
         - (N, d) Euclidean features (position, spherical, etc.)
-        - (N, 3, 3) rotation matrices (SO(3)) via log-exp smoothing
+        - (N, 3, 3) rotation matrices (SO(3)) via quaternion smoothing
 
     Args:
         arr: array-like
@@ -118,18 +236,13 @@ def moving_average_centered_6d(arr, win):
 
     # Rotation
     if arr.ndim == 3 and arr.shape[1:] == (3, 3):
-        # Convert rotations to so(3) vectors
-        omegas = np.array([so3_log(R) for R in arr])  # (N,3)
-
-        # Smooth in R^3
-        omegas_s = moving_average_centered(omegas, win)
-
-        # Map back to SO(3)
-        R_s = np.array([so3_exp(w) for w in omegas_s])
+        quats = rotation_matrices_to_quat_wxyz(arr)
+        quats_s = moving_average_centered_quat(quats, win)
+        R_s = quat_wxyz_to_rotation_matrices(quats_s)
         return R_s
     
     else:
-        return moving_average_centered(arr, win)
+        return moving_average_centered_pos(arr, win)
 
 def smooth_prediction_by_velocity(
     probe: np.ndarray,
@@ -170,7 +283,7 @@ def smooth_prediction_by_velocity(
     v = np.diff(full, axis=0)  # (Hp, D)
 
     # Smooth velocities using a centered moving average
-    v_s = moving_average_centered(v, int(win))
+    v_s = moving_average_centered_pos(v, int(win))
 
     # Enforce a smooth connection direction using the probe's last delta
     v0_probe = probe[-1] - probe[-2]
@@ -235,7 +348,7 @@ def smooth_prediction_by_twist_6d(
     full_p = np.vstack([p_last[None, :], pred_pos])  # (Hp+1, 3)
     v = np.diff(full_p, axis=0)                      # (Hp, 3)
 
-    v_s = moving_average_centered(v, int(win))
+    v_s = moving_average_centered_pos(v, int(win))
 
     # Blend first step with probe's last delta
     v0_probe = probe_pos[-1] - probe_pos[-2]
@@ -248,28 +361,173 @@ def smooth_prediction_by_twist_6d(
         cur_p = cur_p + v_s[i]
         pred_pos_s[i] = cur_p
 
-    # Rotation: smooth ω from relative rotations
-    # ω_i = Log( R_{i}^T R_{i+1} )
     R_last = probe_rot[-1]
     full_R = np.concatenate([R_last[None, :, :], pred_rot], axis=0)  # (Hp+1, 3, 3)
 
-    omegas = np.empty((Hp, 3), dtype=np.float64)
+    dR_seq = np.empty((Hp, 3, 3), dtype=np.float64)
     for i in range(Hp):
-        dR = full_R[i].T @ full_R[i+1]
-        omegas[i] = so3_log(dR)
+        dR_seq[i] = full_R[i].T @ full_R[i+1]
 
-    omegas_s = moving_average_centered(omegas, int(win))
+    dq_seq = rotation_matrices_to_quat_wxyz(dR_seq)
+    dq_s = moving_average_centered_quat(dq_seq, int(win))
 
-    # Blend first step with probe's last angular increment
+    # Blend first step with probe's last angular increment.
     dR_probe = probe_rot[-2].T @ probe_rot[-1]
-    omega0_probe = so3_log(dR_probe)
-    if np.linalg.norm(omega0_probe) > eps:
-        omegas_s[0] = float(blend_first_step_rot) * omega0_probe + (1.0 - float(blend_first_step_rot)) * omegas_s[0]
+    dq_probe = rotation_matrices_to_quat_wxyz(dR_probe[None, :, :])[0]
+    if np.linalg.norm(dq_probe[1:]) > eps or abs(dq_probe[0] - 1.0) > eps:
+        if np.dot(dq_probe, dq_s[0]) < 0.0:
+            dq_probe = -dq_probe
+        dq_s[0] = normalize_quaternion(
+            float(blend_first_step_rot) * dq_probe
+            + (1.0 - float(blend_first_step_rot)) * dq_s[0]
+        )
+
+    dR_s = quat_wxyz_to_rotation_matrices(dq_s)
 
     pred_rot_s = np.empty_like(pred_rot)
     cur_R = R_last.copy()
     for i in range(Hp):
-        cur_R = cur_R @ so3_exp(omegas_s[i])
+        cur_R = cur_R @ dR_s[i]
         pred_rot_s[i] = cur_R
 
     return pred_pos_s, pred_rot_s
+
+# ============================================================
+# Save helpers
+# ============================================================
+
+def process_csv(input_path, output_path, freq=20, downsample=5):
+    """
+    Process raw CSV file by adding time column and downsampling.
+
+    Args:
+    - input_path: path to raw CSV file with columns [time, x, y, z, qx, qy, qz, qw]
+    - output_path: path to save processed CSV
+    - freq: frequency of the trajectory (for generating time column if not present)
+    - downsample: int, if > 1, take every N-th row for downsampling
+    """
+    df = pd.read_csv(input_path)
+
+    if downsample > 1:
+        df = df.iloc[::downsample].reset_index(drop=True)
+
+    dt = 1.0 / freq
+    df["time"] = (np.arange(len(df)) * dt).round(2)
+
+    df.to_csv(output_path, index=False)
+
+    print(f"[Process CSV] Processed CSV saved to {output_path}")
+
+def save_predictions_to_csv(
+    filepath,
+    preds,
+    preds_quat,
+    *,
+    dt=0.005,
+):
+    """
+    Save GP predicted trajectory (position + quaternion) to CSV.
+
+    Args:
+        filepath: output CSV file path
+        preds: (N, 3) predicted positions
+        preds_quat: (N, 4) predicted orientations as quaternions [w, x, y, z]
+        dt: time step between predictions (for generating timestamps)
+    """
+    if preds is None or preds_quat is None:
+        raise ValueError("preds or preds_quat is None")
+
+    P = np.asarray(preds, dtype=np.float64)
+    Q = np.asarray(preds_quat, dtype=np.float64)
+
+    assert len(P) == len(Q), f"Length mismatch: preds has {len(P)} points, preds_quat has {len(Q)} points"
+
+    N = len(P)
+
+    with open(filepath, "w", newline="") as f:
+        writer = csv.writer(f)
+
+        writer.writerow([
+            "time",
+            "x", "y", "z",
+            "qx", "qy", "qz", "qw"
+        ])
+
+        for i in range(N):
+            t = i * dt
+
+            x, y, z = P[i]
+            qw, qx, qy, qz = Q[i]
+
+            writer.writerow([
+                round(float(t), 4),
+                round(float(x), 6), round(float(y), 6), round(float(z), 6),
+                round(float(qx), 6), round(float(qy), 6), round(float(qz), 6), round(float(qw), 6)
+            ])
+
+    print(f"[Save] Predictions saved to {filepath}")
+
+# ============================================================
+# Plot helpers
+# ============================================================
+
+def plot_orientation_error(ref_rot, pred_rot, start_idx, R_ref_probe):
+    """
+    Plot orientation error (in degrees) between predicted and reference rotations, 
+    after aligning the first predicted pose.
+
+    Args:
+        ref_rot: (N, 3, 3) reference rotations
+        pred_rot: (H, 3, 3) predicted rotations
+        start_idx: int, index in reference where prediction starts (after probe end)
+    """
+    ref_rot = np.asarray(ref_rot, dtype=np.float64)
+    pred_rot = np.asarray(pred_rot, dtype=np.float64)
+
+    H = len(pred_rot)
+    ref_seg = ref_rot[start_idx:]
+
+    if len(ref_seg) < 2:
+        raise ValueError("Reference segment too short")
+
+    # SLERP progress alignment
+    ref_R = R.from_matrix(ref_seg)
+
+    ref_progress = np.linspace(0, 1, len(ref_seg))
+    pred_progress = np.linspace(0, 1, H)
+
+    slerp = Slerp(ref_progress, ref_R)
+    ref_interp = slerp(pred_progress).as_matrix()
+
+    # Remove initial orientation offset
+    R_ref0 = ref_interp[0]
+    R_pred0 = pred_rot[0]
+
+    errors = []
+
+    for i in range(H):
+        dR_ref = R_ref0.T @ ref_interp[i]
+        dR_ref = R_ref_probe.T @ dR_ref @ R_ref_probe
+        dR_pred = R_pred0.T @ pred_rot[i]
+
+        R_err = dR_ref.T @ dR_pred
+
+        cos_theta = (np.trace(R_err) - 1) / 2
+        cos_theta = np.clip(cos_theta, -1.0, 1.0)
+
+        theta = np.arccos(cos_theta)
+        errors.append(np.degrees(theta))
+
+    errors = np.array(errors)
+
+    # Plot
+    plt.figure()
+    plt.plot(errors)
+    plt.xlabel("Step")
+    plt.ylabel("Orientation Error (deg)")
+    plt.title("Orientation Trend Error")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    return errors
