@@ -1,9 +1,10 @@
 import csv
-import pandas as pd
 import numpy as np
+import pandas as pd
+from matplotlib import pyplot as plt
+from scipy.spatial.transform import Rotation as R, Slerp
 
-from utils.quaternion import quat_mul, quat_inv, quat_normalize, quat_log, quat_exp
-from utils.so3 import so3_log, so3_exp
+from utils.quaternion import rotmat_to_quat, quat_mul, quat_inv, quat_normalize, quat_log, quat_exp
 
 
 # ============================================================
@@ -165,14 +166,7 @@ def moving_average_centered_6d(arr, win):
             if np.dot(qs[i-1], qs[i]) < 0:
                 qs[i] = -qs[i]
 
-        # Log map
-        omegas = np.array([quat_log(q) for q in qs])
-
-        # Smooth in R^3
-        omegas_s = moving_average_centered_orient(omegas, win)
-
-        # Exp map back
-        qs_s = np.array([quat_exp(w) for w in omegas_s])
+        qs_s = moving_average_centered_orient(qs, int(win))
 
         # Normalize
         qs_s = np.array([quat_normalize(q) for q in qs_s])
@@ -416,3 +410,68 @@ def save_predictions_to_csv(
             ])
 
     print(f"[Save] Predictions saved to {filepath}")
+
+# ============================================================
+# Plot helpers
+# ============================================================
+
+def plot_orientation_error(ref_quat, preds_quat, start_idx, R_ref_probe):
+    """
+    Plot orientation error trend between reference and predicted quaternions, 
+    after SLERP alignment and removing initial offset.
+
+    Args:
+        ref_quat: (N, 4) reference rotations as quaternions [w, x, y, z]
+        preds_quat: (H, 4) predicted rotations as quaternions [w, x, y, z]
+        start_idx: int, index in reference where prediction starts (after probe end)
+    """
+    ref_quat = np.asarray(ref_quat, dtype=np.float64)
+    preds_quat = np.asarray(preds_quat, dtype=np.float64)
+
+    H = len(preds_quat)
+    q_ref_probe = rotmat_to_quat(R_ref_probe)
+
+    ref_seg = ref_quat[start_idx:]
+
+    if len(ref_seg) < 2:
+        raise ValueError("Reference segment too short")
+
+    # SLERP alignment in quaternion space
+    ref_R = R.from_quat(ref_seg[:, [1,2,3,0]])
+
+    ref_progress = np.linspace(0, 1, len(ref_seg))
+    pred_progress = np.linspace(0, 1, H)
+
+    slerp = Slerp(ref_progress, ref_R)
+    ref_interp = (slerp(pred_progress).as_quat())[:, [3,0,1,2]]
+
+    q_ref0 = ref_interp[0]
+    q_pred0 = preds_quat[0]
+
+    errors = []
+
+    for i in range(H):
+        dq_ref = quat_mul(quat_inv(q_ref0), ref_interp[i])
+        dq_ref = quat_mul(quat_mul(quat_inv(q_ref_probe), dq_ref), q_ref_probe)
+        dq_pred = quat_mul(quat_inv(q_pred0), preds_quat[i])
+
+        q_err = quat_mul(quat_inv(dq_ref), dq_pred)
+
+        w = np.clip(abs(q_err[0]), -1.0, 1.0)
+        theta = 2.0 * np.arccos(w)
+
+        errors.append(np.degrees(theta))
+
+    errors = np.array(errors)
+
+    # Plot
+    plt.figure()
+    plt.plot(errors)
+    plt.xlabel("Step")
+    plt.ylabel("Orientation Error (deg)")
+    plt.title("Orientation Trend Error")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    return errors
