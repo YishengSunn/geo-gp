@@ -118,10 +118,10 @@ def on_key(app6d, event):
         load_demo_circles_with_orientation(app6d)
 
     elif key == "R":
-        load_ref_from_csv(app6d, "data/02-16-1/refs_2/ee_trajectory_2026-02-16_15-33-07.csv")
+        load_ref_from_csv(app6d, "data/02-16-1/refs_1/ee_trajectory_2026-02-16_15-01-33.csv")
 
     elif key == "P":
-        load_probe_from_csv(app6d, "data/02-16-1/probes_2/ee_trajectory_2026-02-16_15-34-03.csv")
+        load_probe_from_csv(app6d, "data/02-16-1/probes_1/ee_trajectory_2026-02-16_15-03-57.csv")
 
     elif key == "t":
         if app6d.use_6d:
