@@ -1,6 +1,8 @@
 import csv
 import numpy as np
 
+from utils.misc import quat_wxyz_to_rotation_matrices
+
 
 def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
     """
@@ -103,17 +105,18 @@ def load_demo_circles_with_orientation(app6d, *, T=400, r_ref=0.5, r_probe=1.0):
     print(f"[Demo] Loaded circles with orientation: ref_raw={len(app6d.ref_raw)}, probe_raw={len(app6d.probe_raw)}")
     print()
 
-def load_ref_xyz_from_csv(app6d, filepath):
+def load_ref_from_csv(app6d, filepath):
     """
-    Load x,y,z columns from a CSV with fields:
+    Load position and quaternion from CSV with fields:
     time,x,y,z,qx,qy,qz,qw
 
-    Only xyz are used and written into app6d.ref_raw.
+    Quaternion will be converted to [w, x, y, z].
 
     Args:
         filepath: str, path to the CSV file
     """
     pts = []
+    rotmats = []
 
     with open(filepath, "r") as f:
         reader = csv.DictReader(f)
@@ -122,33 +125,45 @@ def load_ref_xyz_from_csv(app6d, filepath):
                 x = float(row["x"])
                 y = float(row["y"])
                 z = float(row["z"])
+
+                qx = float(row["qx"])
+                qy = float(row["qy"])
+                qz = float(row["qz"])
+                qw = float(row["qw"])
+
                 pts.append([x, y, z])
+                q = [qw, qx, qy, qz]
+                R = quat_wxyz_to_rotation_matrices(np.array([q]))[0]
+                rotmats.append(R)
+
             except Exception:
                 continue
 
     if len(pts) == 0:
-        print("[LoadCSV] No valid xyz rows found!")
+        print("[LoadCSV] No valid rows found!")
         print()
         return
 
     app6d.ref_raw = pts
-    app6d.ref_rot_raw = None
+    app6d.ref_rot_raw = np.asarray(rotmats, dtype=np.float64)
 
     app6d.update_ref_lines()
-    print(f"[LoadCSV] Loaded {len(app6d.ref_raw)} reference points from CSV.")
+
+    print(f"[LoadCSV] Loaded {len(app6d.ref_raw)} reference points with orientation.")
     print()
 
-def load_probe_xyz_from_csv(app6d, filepath):
+def load_probe_from_csv(app6d, filepath):
     """
-    Load x,y,z columns from a CSV with fields:
+    Load position and quaternion from CSV with fields:
     time,x,y,z,qx,qy,qz,qw
 
-    Only xyz are used and written into app6d.probe_raw.
+    Quaternion will be converted to [w, x, y, z].
 
     Args:
         filepath: str, path to the CSV file
     """
     pts = []
+    rotmats = []
 
     with open(filepath, "r") as f:
         reader = csv.DictReader(f)
@@ -157,18 +172,29 @@ def load_probe_xyz_from_csv(app6d, filepath):
                 x = float(row["x"])
                 y = float(row["y"])
                 z = float(row["z"])
+
+                qx = float(row["qx"])
+                qy = float(row["qy"])
+                qz = float(row["qz"])
+                qw = float(row["qw"])
+
                 pts.append([x, y, z])
+                q = [qw, qx, qy, qz]
+                R = quat_wxyz_to_rotation_matrices(np.array([q]))[0]
+                rotmats.append(R)
+
             except Exception:
                 continue
 
     if len(pts) == 0:
-        print("[LoadCSV] No valid xyz rows found!")
+        print("[LoadCSV] No valid rows found!")
         print()
         return
 
     app6d.probe_raw = pts
-    app6d.probe_rot_raw = None
+    app6d.probe_rot_raw = np.asarray(rotmats, dtype=np.float64)
 
     app6d.update_probe_lines()
-    print(f"[LoadCSV] Loaded {len(app6d.probe_raw)} probe points from CSV.")
+
+    print(f"[LoadCSV] Loaded {len(app6d.probe_raw)} probe points with orientation.")
     print()
