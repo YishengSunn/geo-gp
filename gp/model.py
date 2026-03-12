@@ -1,9 +1,9 @@
 import numpy as np
 import torch
 
-from config.runtime import (
-    METHOD_ID, METHOD_HPARAM, 
-    MAX_EXPERTS, MAX_DATA_PER_EXPERT, MIN_POINTS_OFFLINE, NEAREST_K, WINDOW_SIZE
+from config.runtime import ( 
+    NEAREST_K, MAX_EXPERTS, MAX_DATA_PER_EXPERT, MIN_POINTS_OFFLINE, WINDOW_SIZE,
+    METHOD_ID, METHOD_HPARAM
 )
 from utils.so3 import so3_exp
 from geometry.features import (
@@ -13,6 +13,7 @@ from geometry.features import (
 from gp.skygp_moe import SkyGP_MOE
 from utils.quaternion import rotmat_to_quat, quat_mul, quat_inv, quat_normalize
 from utils.misc import torch_to_np, Standardizer
+
 
 def train_gp(dataset, method_id=METHOD_ID):
     """
