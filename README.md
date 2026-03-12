@@ -1,6 +1,6 @@
-# Geometric Invariant Gaussian Process for 3D / 6D Trajectory Learning
+# Geometric Invariant Gaussian Process for 6D Trajectory Learning
 
-This repository contains an interactive research codebase for **geometry-invariant one-shot Gaussian Process (GP) learning** of **3D and 6D (SE(3)) trajectories**.
+This repository contains an interactive research codebase for **geometry-invariant one-shot Gaussian Process (GP) learning** of **6D (SE(3)) trajectories**.
 
 The core idea is:
 
@@ -8,14 +8,36 @@ The core idea is:
 > align a new probe trajectory to the reference via a similarity transform,  
 > then **roll out predictions in the aligned reference frame** and map them back to the probe/world frame.
 
+The system predicts **both position and orientation**, and the **probe trajectory orientation can differ from the reference orientation**.
+
 ## Features
 
 - **One-shot GP learning** from a single reference trajectory
-- **Geometry-invariant representations**
-  - planar angle representations relative to a start tangent
-  - 3D trajectory inputs (e.g., spherical features)
-  - 6D pose handling (position + orientation in SO(3))
+- **Geometry-invariant representation**
+  - the **spherical coordinates of the reference trajectory** are used as the GP input
+- **SE(3) trajectory prediction**
+  - GP outputs **position and orientation deltas**
+  - orientation is represented using **quaternions**
+- **Autoregressive rollout prediction**
+  - predicted deltas are applied step-by-step to generate the full trajectory
 - **Similarity alignment** between probe and reference in 3D
-- **Rollout in the reference frame**, then projection back to probe/world
-- **6D pipeline support** (orientation visualization + SO(3) log/exp utilities)
-- **Interactive UI** to draw, train, align, predict, and visualize results
+- **Orientation-invariant prompting**
+  - probe trajectory orientation can differ from the reference orientation
+- **Skill library support**
+  - automatically match the probe trajectory to the most similar reference trajectory
+- **Interactive UI** for drawing trajectories, training models, and visualizing predictions
+
+## Usage
+
+First clone the repository and ensure that **uv** is installed.
+
+```bash
+git clone <repo-url>
+cd <repo-directory>
+```
+
+Then run the application using:
+
+```bash
+uv run python3 -m main6d
+```
