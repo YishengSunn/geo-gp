@@ -18,12 +18,6 @@ CFG = Config(CFG_PATH)
 SEED = CFG.experiment["seed"]
 
 # ============================================================
-# Dataset parameters
-# ============================================================
-
-TRAIN_RATIO = CFG.dataset["train_ratio"]       # Training ratio (1.0 means full training)
-
-# ============================================================
 # Sampling / time
 # ============================================================
 
@@ -31,7 +25,13 @@ SAMPLE_HZ = CFG.sampling["sample_hz"]          # Sample frequency for equal-dt r
 DEFAULT_SPEED = CFG.sampling["default_speed"]  # Convert polyline length to time for equal-time sampling
 
 # ============================================================
-# Core GP / rollout parameters
+# Dataset parameters
+# ============================================================
+
+TRAIN_RATIO = CFG.dataset["train_ratio"]       # Training ratio (1.0 means full training)
+
+# ============================================================
+# Core GP parameters
 # ============================================================
 
 K_HIST = CFG.sampling["k_hist"]      # Seed history length
@@ -45,5 +45,16 @@ WINDOW_SIZE = CFG.gp["window_size"]  # Sliding window size (None means not used)
 # Method settings
 # ============================================================
 
-METHOD_ID = CFG.method["id"]            # 1: polar->delta, 5: polar+delta->delta
+METHOD_ID = CFG.method["id"]
 METHOD_HPARAM = CFG.method["hparams"]   # Hyperparameters for the method
+
+# ============================================================
+# Prediction
+# ============================================================
+
+ROLLOUT_HORIZON = CFG.matching["rollout_horizon"]  # Max steps to rollout
+MSE_THRESH = CFG.matching["mse_thresh"]            # Threshold for geometric drift detection
+GOAL_STOP_EPS = CFG.matching["goal_stop_eps"]      # Stop if within this distance to goal
+MAX_START_JUMP = CFG.matching["max_start_jump"]    # Max allowed jump at the start of the trajectory
+DROP_K = CFG.matching["drop_k"]                    # Number of probe points to drop on each retry after drift detection
+MAX_RETRIES = CFG.matching["max_retries"]          # Max number of retries for prediction after drift detection

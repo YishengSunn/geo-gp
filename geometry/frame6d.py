@@ -99,6 +99,10 @@ def estimate_rotation_scale_3d_search_by_count(
     j_lo = max(3, j_center - margin_pts)
     j_hi = min(len(ref_eq), j_center + margin_pts)
 
+    if j_lo > j_hi:
+        j_lo = 3
+        j_hi = len(ref_eq)
+
     best = None
     for j_end in range(j_lo, j_hi + 1, step):
         X = ref_eq[:j_end]
