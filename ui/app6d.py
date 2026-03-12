@@ -3,18 +3,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from config.runtime import (
-    TRAIN_RATIO, SAMPLE_HZ, DEFAULT_SPEED, K_HIST, METHOD_ID
+    SAMPLE_HZ, DEFAULT_SPEED, TRAIN_RATIO, K_HIST, METHOD_ID,
+    ROLLOUT_HORIZON, MSE_THRESH, GOAL_STOP_EPS, MAX_START_JUMP, DROP_K, MAX_RETRIES
 )
 from geometry.frame6d import estimate_rotation_scale_3d_search_by_count
 from geometry.metrics import geom_mse
 from geometry.resample import resample_trajectory_3d_equal_dt, resample_trajectory_6d_equal_dt
 from gp.dataset import build_dataset_3d, build_dataset_6d, time_split
 from gp.model import train_gp, rollout_reference_3d, rollout_reference_6d
+from skills.skill_library import SkillLibrary
+from skills.skill_loader import load_and_train_skills
 from ui.handlers6d import on_press, on_move, on_release, on_key
 from utils.misc import (
     moving_average_centered_pos, moving_average_centered_6d, 
-    smooth_prediction_by_velocity, smooth_prediction_by_twist_6d,
-    plot_orientation_error
+    smooth_prediction_by_velocity, smooth_prediction_by_twist_6d, plot_orientation_error
 )
 from utils.quaternion import quat_to_rotmat
 
@@ -50,20 +52,26 @@ class DrawApp6D:
 
         self.gt = None               # np.ndarray (H,3)
         self.preds = None            # np.ndarray (H,3)
-        self.preds_quat = None
+        self.preds_quat = None       # np.ndarray (H,4)
         self.probe_goal = None       # np.ndarray (3,)
-        self.goal_stop_eps = 0.01    # Stop if within this distance to goal
-        self.rollout_horizon = 2000  # Max steps to rollout
-        self.prediction_id = 0
+        self.prediction_id = 0       # Incremented on each new prediction to cancel old ones
 
         # Smoothing
         self.smooth_enabled = True
-        self.smooth_win = 15
+        self.smooth_win = 9
 
         # Drawing state
         self.drawing_ref = False
         self.drawing_probe = False
-        self.use_6d = True
+        self.use_6d = False
+
+        # Skill library
+        mode = "6d" if self.use_6d else "3d"
+        self.skill_library = SkillLibrary()
+        skills = load_and_train_skills("data/02-26/refs", k=K_HIST, mode=mode)
+        for s in skills:
+            self.skill_library.add_skill(s)
+        print(self.skill_library)
 
         # Build UI
         self.init_ui()
@@ -83,11 +91,11 @@ class DrawApp6D:
         self.ax_xy.set_aspect("equal", adjustable="box")
         self.ax_yz.set_aspect("equal", adjustable="box")
 
-        self.ax_xy.set_xlim(-1, 1)
-        self.ax_xy.set_ylim(-1, 1)
+        self.ax_xy.set_xlim(0.0, 0.5)
+        self.ax_xy.set_ylim(0.0, 0.5)
 
-        self.ax_yz.set_xlim(-1, 1)
-        self.ax_yz.set_ylim(-1, 1)
+        self.ax_yz.set_xlim(0.0, 0.1)
+        self.ax_yz.set_ylim(0.0, 0.1)
 
         # Init lines (2D)
         (self.line_ref_xy,) = self.ax_xy.plot([], [], lw=2.5, c='r', label="ref")
@@ -214,10 +222,10 @@ class DrawApp6D:
         self.prediction_id += 1
         local_pred_id = self.prediction_id
 
-        if self.model_info is None or self.ref_eq is None:
-            print("[Predict] Train first (press T)!")
-            print()
-            return
+        # if self.model_info is None or self.ref_eq is None:
+        #     print("[Predict] Train first (press T)!")
+        #     print()
+        #     return
 
         # 1) Resample probe
         self.probe_eq = resample_trajectory_3d_equal_dt(self.probe_raw, sample_hz=SAMPLE_HZ, speed=DEFAULT_SPEED)
@@ -235,21 +243,26 @@ class DrawApp6D:
         self.line_probe_3d.set_3d_properties(self.probe_eq[:, 2])
         self.fig.canvas.draw_idle()
 
-        # 2) Alignment using first n_align points
-        na = min(n_align, len(self.ref_eq), len(self.probe_eq))
-        if na < 3:
-            print("[Predict] Not enough points for alignment!")
-            print()
-            return
+        # 2) Alignment
+        skill, (R, s, t, j_end) = self.skill_library.match(self.probe_eq, margin_pts=1000)
 
-        R, s, t = estimate_rotation_scale_3d_search_by_count(
-            self.ref_eq,
-            self.probe_eq,
-            margin_pts=300,
-            step=10,
-        )[:3]
+        self.ref_eq = skill.ref_eq
+        self.model_info = skill.model
+
+        # na = min(n_align, len(self.ref_eq), len(self.probe_eq))
+        # if na < 3:
+        #     print("[Predict] Not enough points for alignment!")
+        #     print()
+        #     return
+
+        # R, s, t = estimate_rotation_scale_3d_search_by_count(
+        #     self.ref_eq,
+        #     self.probe_eq,
+        #     margin_pts=300,
+        #     step=10,
+        # )[:3]
+
         self.R, self.s, self.t = R, s, t
-        # print(f"[Predict] Alignment done. R=\n{R}, s={s:.4f}, t={t}")
 
         # 3) Transform probe into ref frame
         probe_in_ref = ((self.probe_eq - t) / s) @ R
@@ -257,17 +270,15 @@ class DrawApp6D:
 
         # 4) Rollout in ref frame
         self.preds = None
+        steps_left = len(self.ref_eq) - len(self.probe_eq)
 
-        mse_thresh = 0.0001
-        drop_k = 10
-        max_retries = 5
-
-        for attempt in range(max_retries):
+        for attempt in range(MAX_RETRIES):
             cur_hist = probe_in_ref.copy()
             preds_world = []
             failed = False
+            prev_d = np.inf
 
-            for step in range(self.rollout_horizon):
+            for step in range(ROLLOUT_HORIZON):
                 if local_pred_id != self.prediction_id:
                     print("[Predict] Cancelled by new drawing.")
                     print()
@@ -293,17 +304,24 @@ class DrawApp6D:
                 cur_hist = np.vstack([cur_hist, next_ref])
  
                 # Truncation Logic
-                if self.probe_goal is not None:
+                if self.probe_goal is not None and step >= steps_left - 285:
                     d = np.linalg.norm(next_world - self.probe_goal)
-                    if d < self.goal_stop_eps and np.max(vars_ref) > 1e-3:
+                    
+                    if d < GOAL_STOP_EPS and np.max(vars_ref) > 1e-3:
                         print(f"[Predict] Reached goal at step {step}, d={d:.4f}")
                         break
+
+                    if d > prev_d:
+                        print(f"[Predict] Moving away from goal at step {step}, d={d:.4f}")
+                        break
+                    
+                    prev_d = d
 
             # Geometric drift check
             mse_full = geom_mse(cur_hist, self.ref_eq, min(len(cur_hist), len(self.ref_eq)))
             print(f"[GeomCheck] full mse = {mse_full:.4f}")
 
-            if mse_full > mse_thresh:
+            if mse_full > MSE_THRESH:
                 print("[Recover] Geometric drift detected, retry...")
                 failed = True
 
@@ -312,10 +330,9 @@ class DrawApp6D:
 
                 # Robust start selection: enforce temporal consistency
                 probe_end = self.probe_eq[-1]
-                max_start_jump = 0.05
 
                 dists = np.linalg.norm(preds_world - probe_end, axis=1)
-                candidate_idxs = np.where(dists < max_start_jump)[0]
+                candidate_idxs = np.where(dists < MAX_START_JUMP)[0]
                 
                 if len(candidate_idxs) == 0:
                     print(f"[Recover] No prediction point close enough to probe end, retry...")
@@ -338,11 +355,11 @@ class DrawApp6D:
                     break
 
             # Drop tail of probe history and retry
-            if probe_in_ref.shape[0] <= (k + drop_k):
+            if probe_in_ref.shape[0] <= (k + DROP_K):
                 break
 
-            probe_in_ref = probe_in_ref[:-drop_k]
-            print(f"[Recover] Dropping last {drop_k} probe points, retry {attempt+1}")
+            probe_in_ref = probe_in_ref[:-DROP_K]
+            print(f"[Recover] Dropping last {DROP_K} probe points, retry {attempt+1}")
 
         if self.preds is None:
             print("[Predict] All retries failed. No prediction output.")
@@ -417,35 +434,39 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
         # 2) Alignment
-        R, s, t, j_end = estimate_rotation_scale_3d_search_by_count(
-            self.ref_eq,
-            self.probe_eq,
-            margin_pts=300,
-            step=10,
-        )[:4]
+        skill, (R, s, t, j_end) = self.skill_library.match(self.probe_eq, margin_pts=1000)
+
+        # R, s, t, j_end = estimate_rotation_scale_3d_search_by_count(
+        #     self.ref_eq,
+        #     self.probe_eq,
+        #     margin_pts=300,
+        #     step=10,
+        # )[:4]
+
         self.R, self.s, self.t = R, s, t
+
+        self.ref_eq = skill.ref_eq
+        self.ref_quat_eq = skill.ref_quat_eq
+        self.model_info = skill.model
 
         # 3) Transform probe into ref frame
         probe_in_ref = ((self.probe_eq - t) / s) @ R
         self.probe_goal = self.s * (self.ref_eq[-1] @ self.R.T) + self.t
 
         # 4) Rollout in ref frame
-        mse_thresh = 0.0001
-        drop_k = 10
-        max_retries = 5
-
         self.preds = None
         self.preds_quat = None
 
-        for attempt in range(max_retries):
+        for attempt in range(MAX_RETRIES):
             cur_pos = probe_in_ref.copy()
             cur_quat = self.probe_quat_eq.copy()[:cur_pos.shape[0]]
 
             preds_world_pos = []
             preds_world_quat = []
             failed = False
+            prev_d = np.inf
 
-            for step in range(self.rollout_horizon):
+            for step in range(ROLLOUT_HORIZON):
                 if local_pred_id != self.prediction_id:
                     print("[Predict] Cancelled by new drawing.")
                     print()
@@ -478,15 +499,22 @@ class DrawApp6D:
                 # Truncation logic
                 if self.probe_goal is not None:
                     d = np.linalg.norm(next_world_pos - self.probe_goal)
-                    if d < self.goal_stop_eps and np.max(vars_ref) > 1e-3:
+
+                    if d < GOAL_STOP_EPS and np.max(vars_ref) > 1e-3:
                         print(f"[Predict] Reached goal at step {step}, d={d:.4f}")
                         break
+
+                    if d > prev_d:
+                        print(f"[Predict] Moving away from goal at step {step}, d={d:.4f}")
+                        break
+
+                    prev_d = d
 
             # Geometric drift check (position only)
             mse_full = geom_mse(cur_pos, self.ref_eq, min(len(cur_pos), len(self.ref_eq)))
             print(f"[GeomCheck] full mse = {mse_full:.4f}")
 
-            if mse_full > mse_thresh:
+            if mse_full > MSE_THRESH:
                 print("[Recover] Geometric drift detected, retry...")
                 failed = True
 
@@ -496,10 +524,9 @@ class DrawApp6D:
 
                 # Robust start selection near probe end
                 probe_end = self.probe_eq[-1]
-                max_start_jump = 0.05
 
                 dists = np.linalg.norm(preds_world_pos - probe_end, axis=1)
-                candidate_idxs = np.where(dists < max_start_jump)[0]
+                candidate_idxs = np.where(dists < MAX_START_JUMP)[0]
 
                 if len(candidate_idxs) == 0:
                     print("[Recover] No prediction point close to probe end, retry...")
@@ -522,11 +549,11 @@ class DrawApp6D:
                     break
 
             # Drop tail and retry
-            if probe_in_ref.shape[0] <= (k + drop_k):
+            if probe_in_ref.shape[0] <= (k + DROP_K):
                 break
 
-            probe_in_ref = probe_in_ref[:-drop_k]
-            print(f"[Recover] Dropping last {drop_k} probe points, retry {attempt+1}")
+            probe_in_ref = probe_in_ref[:-DROP_K]
+            print(f"[Recover] Dropping last {DROP_K} probe points, retry {attempt+1}")
 
         if self.preds is None:
             print("[Predict] All retries failed. No prediction output.")
