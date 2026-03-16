@@ -91,11 +91,11 @@ class DrawApp6D:
         self.ax_xy.set_aspect("equal", adjustable="box")
         self.ax_yz.set_aspect("equal", adjustable="box")
 
-        self.ax_xy.set_xlim(0.0, 0.5)
-        self.ax_xy.set_ylim(0.0, 0.5)
+        self.ax_xy.set_xlim(-1.0, 1.0)
+        self.ax_xy.set_ylim(-1.0, 1.0)
 
-        self.ax_yz.set_xlim(0.0, 0.1)
-        self.ax_yz.set_ylim(0.0, 0.1)
+        self.ax_yz.set_xlim(0.0, 0.25)
+        self.ax_yz.set_ylim(0.0, 0.25)
 
         # Init lines (2D)
         (self.line_ref_xy,) = self.ax_xy.plot([], [], lw=2.5, c='r', label="ref")
@@ -244,7 +244,7 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
         # 2) Alignment
-        skill, (R, s, t, j_end) = self.skill_library.match(self.probe_eq, margin_pts=1000)
+        skill, (R, s, t, j_end) = self.skill_library.match(self.probe_eq)
 
         self.ref_eq = skill.ref_eq
         self.model_info = skill.model
@@ -276,7 +276,6 @@ class DrawApp6D:
             cur_hist = probe_in_ref.copy()
             preds_world = []
             failed = False
-            prev_d = np.inf
 
             for step in range(ROLLOUT_HORIZON):
                 if local_pred_id != self.prediction_id:
@@ -304,18 +303,12 @@ class DrawApp6D:
                 cur_hist = np.vstack([cur_hist, next_ref])
  
                 # Truncation Logic
-                if self.probe_goal is not None and step >= steps_left - 285:
+                if self.probe_goal is not None:
                     d = np.linalg.norm(next_world - self.probe_goal)
                     
                     if d < GOAL_STOP_EPS and np.max(vars_ref) > 1e-3:
                         print(f"[Predict] Reached goal at step {step}, d={d:.4f}")
                         break
-
-                    if d > prev_d:
-                        print(f"[Predict] Moving away from goal at step {step}, d={d:.4f}")
-                        break
-                    
-                    prev_d = d
 
             # Geometric drift check
             mse_full = geom_mse(cur_hist, self.ref_eq, min(len(cur_hist), len(self.ref_eq)))
@@ -464,7 +457,6 @@ class DrawApp6D:
             preds_world_pos = []
             preds_world_quat = []
             failed = False
-            prev_d = np.inf
 
             for step in range(ROLLOUT_HORIZON):
                 if local_pred_id != self.prediction_id:
@@ -503,12 +495,6 @@ class DrawApp6D:
                     if d < GOAL_STOP_EPS and np.max(vars_ref) > 1e-3:
                         print(f"[Predict] Reached goal at step {step}, d={d:.4f}")
                         break
-
-                    if d > prev_d:
-                        print(f"[Predict] Moving away from goal at step {step}, d={d:.4f}")
-                        break
-
-                    prev_d = d
 
             # Geometric drift check (position only)
             mse_full = geom_mse(cur_pos, self.ref_eq, min(len(cur_pos), len(self.ref_eq)))
