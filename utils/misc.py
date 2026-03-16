@@ -362,6 +362,64 @@ def process_csv(input_path, output_path, freq=20, downsample=5):
 
     print(f"[Process CSV] Processed CSV saved to {output_path}")
 
+def save_reference_raw_to_csv(
+    filepath,
+    ref_pos,
+    ref_quat,
+    *,
+    dt=0.05,
+):
+    """
+    Save raw reference trajectory (position + quaternion) to CSV.
+
+    Args:
+        filepath: output CSV file path
+        ref_pos: (N,3) reference positions
+        ref_quat: (N,4) reference orientations [w,x,y,z]
+        dt: time step between points
+    """
+    if ref_pos is None:
+        raise ValueError("ref_pos is None")
+
+    P = np.asarray(ref_pos, dtype=np.float64)
+    N = len(P)
+
+    if ref_quat is None:
+        Q = np.zeros((N,4))
+        Q[:,0] = 1.0
+    else:
+        Q = np.asarray(ref_quat, dtype=np.float64)
+
+    assert len(P) == len(Q), f"Length mismatch: ref_pos={len(P)}, ref_quat={len(Q)}"
+
+    with open(filepath, "w", newline="") as f:
+        writer = csv.writer(f)
+
+        writer.writerow([
+            "time",
+            "x", "y", "z",
+            "qx", "qy", "qz", "qw"
+        ])
+
+        for i in range(N):
+            t = i * dt
+
+            x, y, z = P[i]
+            qw, qx, qy, qz = Q[i]
+
+            writer.writerow([
+                round(float(t), 4),
+                round(float(x), 6),
+                round(float(y), 6),
+                round(float(z), 6),
+                round(float(qx), 6),
+                round(float(qy), 6),
+                round(float(qz), 6),
+                round(float(qw), 6),
+            ])
+
+    print(f"[Save] Reference raw trajectory saved to {filepath}")
+
 def save_predictions_to_csv(
     filepath,
     preds,
