@@ -92,7 +92,7 @@ class Skill:
         k,
         input_type="spherical",
         output_type="delta",
-        train_ratio=0.8,
+        train_ratio=1.0,
     ):
         """
         Train a GP model for this skill using the reference trajectory.
