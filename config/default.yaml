@@ -11,6 +11,7 @@ sampling:
   k_hist: 10          # Seed history length
   sample_hz: 200      # Sample frequency for equal-dt resampling
   default_speed: 0.2  # Convert polyline length to time for equal-time sampling
+  smooth_win: 9       # Smoothing window size for trajectory smoothing
 
 # =========================
 # Dataset
@@ -41,9 +42,9 @@ method:
 # =========================
 # Prediction
 # =========================
-matching:
+prediction:
   rollout_horizon: 1000  # Max steps to rollout
-  mse_thresh: 0.01      # Threshold for geometric drift detection during rollout
+  mse_thresh: 0.001      # Threshold for geometric drift detection during rollout
   goal_stop_eps: 0.01    # Stop if within this distance to goal
   max_start_jump: 0.01   # Max allowed jump at the start of the trajectory
   drop_k: 5              # Number of probe points to drop on each retry after drift detection
