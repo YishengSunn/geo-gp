@@ -12,7 +12,7 @@ from geometry.resample import resample_trajectory_3d_equal_dt, resample_trajecto
 from gp.dataset import build_dataset_3d, build_dataset_6d, time_split
 from gp.model import train_gp, rollout_reference_3d, rollout_reference_6d
 from skills.skill_library import SkillLibrary
-from skills.skill_loader import load_and_train_skills
+from skills.skill_loader import load_skills_from_models
 from ui.handlers6d import on_press, on_move, on_release, on_key
 from utils.misc import (
     moving_average_centered_pos, moving_average_centered_6d, 
@@ -68,7 +68,7 @@ class DrawApp6D:
         # Skill library
         mode = "6d" if self.use_6d else "3d"
         self.skill_library = SkillLibrary()
-        skills = load_and_train_skills("data/02-26/refs", k=K_HIST, mode=mode)
+        skills = load_skills_from_models("data/02-26/models", mode=mode)
         for s in skills:
             self.skill_library.add_skill(s)
         print(self.skill_library)

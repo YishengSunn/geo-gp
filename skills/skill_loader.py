@@ -40,7 +40,6 @@ def load_skill_csv(path, mode="6d"):
 
     return skill
 
-
 # Load all CSV skills
 def load_skills_from_folder(folder, mode="6d"):
     """
@@ -69,6 +68,34 @@ def load_skills_from_folder(folder, mode="6d"):
 
     return skills
 
+def load_skills_from_models(folder, mode="3d"):
+    """
+    Load all pretrained skill models from a folder. Each .pt file should represent one skill.
+
+    Args:
+        folder: str, path to the folder containing pretrained skill .pt files
+        mode: str, mode of the skills ("3d" or "6d")
+
+    Returns:
+        skills: list of skill objects loaded from the pretrained models
+    """
+    skills = []
+
+    for fname in sorted(os.listdir(folder)):
+        if not fname.endswith(".pt"):
+            continue
+
+        path = os.path.join(folder, fname)
+        name = os.path.splitext(fname)[0]
+
+        skill = Skill(name=name, ref_pos=[], ref_quat=[], mode=mode)
+        skill.load(path)
+
+        skills.append(skill)
+
+    print(f"[SkillLoader] Loaded {len(skills)} pretrained skills")
+
+    return skills
 
 # Load + train skills
 def load_and_train_skills(
