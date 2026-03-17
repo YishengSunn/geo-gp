@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 
@@ -144,6 +145,35 @@ class Skill:
 
         print(f"[Skill] Trained GP for skill: {self.name}, points: {len(self)}")
         print()
+
+    def save(self, folder):
+        """
+        Save the skill to a file.
+
+        Args:
+            folder: directory to save the skill file
+        """
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"{self.name}.pt")
+
+        torch.save({
+            "ref_eq": self.ref_eq,
+            "ref_quat_eq": self.ref_quat_eq,
+            "model": self.model,
+        }, path)
+
+    def load(self, path):
+        """
+        Load the skill from a file.
+
+        Args:
+            path: path to the skill file
+        """
+        data = torch.load(path, weights_only=False)
+
+        self.ref_eq = data["ref_eq"]
+        self.ref_quat_eq = data["ref_quat_eq"]
+        self.model = data["model"]
 
     # Info
     def __len__(self):
