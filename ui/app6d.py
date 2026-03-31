@@ -68,7 +68,7 @@ class DrawApp6D:
         # Skill library
         mode = "6d" if self.use_6d else "3d"
         self.skill_library = SkillLibrary()
-        skills = load_skills_from_models("data/02-26/models", mode=mode)
+        skills = load_skills_from_models("data/02-26/models/3d", mode=mode)
         for s in skills:
             self.skill_library.add_skill(s)
         print(self.skill_library)
@@ -393,10 +393,10 @@ class DrawApp6D:
         self.prediction_id += 1
         local_pred_id = self.prediction_id
 
-        if self.model_info is None or self.ref_eq is None or self.ref_quat_eq is None:
-            print("[Predict] Train first!")
-            print()
-            return
+        # if self.model_info is None or self.ref_eq is None or self.ref_quat_eq is None:
+        #     print("[Predict] Train first!")
+        #     print()
+        #     return
 
         # 1) Resample probe (position + orientation)
         self.probe_eq, self.probe_quat_eq = resample_trajectory_6d_equal_dt(
