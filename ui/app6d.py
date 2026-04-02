@@ -242,7 +242,7 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
         # 2) Alignment
-        skill, (R, s, t) = self.skill_library.match(self.probe_eq)
+        skill, (R, s, t, _) = self.skill_library.match(self.probe_eq)
 
         self.ref_eq = skill.ref_eq
         self.model_info = skill.model
