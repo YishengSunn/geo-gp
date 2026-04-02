@@ -2,9 +2,11 @@ import csv
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-from scipy.spatial.transform import Rotation as R, Slerp
 
-from utils.quaternion import rotmat_to_quat, quat_mul, quat_inv, quat_normalize, quat_log, quat_exp
+from utils.quaternion import (
+    rotmat_to_quat, quat_mul, quat_inv, quat_normalize,
+    quat_log, quat_exp, quat_slerp
+)
 
 
 # ============================================================
@@ -473,6 +475,42 @@ def save_predictions_to_csv(
 # Plot helpers
 # ============================================================
 
+def piecewise_quat_slerp_path(ref_seg, t_samples):
+    """
+    Piecewise SLERP along ref_seg keyframes in [w,x,y,z], parameter t in [0,1]
+    from first to last quaternion.
+
+    Args:
+        ref_seg: (M, 4) reference quaternions [w, x, y, z]
+        t_samples: (H,) time samples in [0,1]
+
+    Returns:
+        out: (H, 4) interpolated quaternions [w, x, y, z]
+    """
+    ref_seg = np.asarray(ref_seg, dtype=np.float64)
+    t_samples = np.asarray(t_samples, dtype=np.float64)
+
+    M = ref_seg.shape[0]
+    H = len(t_samples)
+    if M < 2:
+        raise ValueError("Reference segment too short")
+    
+    t_keys = np.linspace(0.0, 1.0, M)
+    out = np.empty((H, 4), dtype=np.float64)
+    for i in range(H):
+        t = float(np.clip(t_samples[i], 0.0, 1.0))
+        if t <= t_keys[0]:
+            out[i] = quat_normalize(ref_seg[0])
+        elif t >= t_keys[-1]:
+            out[i] = quat_normalize(ref_seg[-1])
+        else:
+            j = int(np.searchsorted(t_keys, t, side="right") - 1)
+            j = min(max(j, 0), M - 2)
+            t0, t1 = t_keys[j], t_keys[j + 1]
+            u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+            out[i] = quat_slerp(ref_seg[j], ref_seg[j + 1], u)
+    return out
+
 def plot_orientation_error(ref_quat, preds_quat, start_idx, R_ref_probe):
     """
     Plot orientation error trend between reference and predicted quaternions, 
@@ -494,14 +532,8 @@ def plot_orientation_error(ref_quat, preds_quat, start_idx, R_ref_probe):
     if len(ref_seg) < 2:
         raise ValueError("Reference segment too short")
 
-    # SLERP alignment in quaternion space
-    ref_R = R.from_quat(ref_seg[:, [1,2,3,0]])
-
-    ref_progress = np.linspace(0, 1, len(ref_seg))
     pred_progress = np.linspace(0, 1, H)
-
-    slerp = Slerp(ref_progress, ref_R)
-    ref_interp = (slerp(pred_progress).as_quat())[:, [3,0,1,2]]
+    ref_interp = piecewise_quat_slerp_path(ref_seg, pred_progress)
 
     q_ref0 = ref_interp[0]
     q_pred0 = preds_quat[0]
