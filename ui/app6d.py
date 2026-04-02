@@ -43,6 +43,7 @@ class DrawApp6D:
         self.probe_eq = None  # np.ndarray (M,3) resampled
         self.ref_quat_eq = None
         self.probe_quat_eq = None
+        self.ref_force_eq = None
 
         # Model / alignment / prediction
         self.model_info = None
@@ -53,6 +54,7 @@ class DrawApp6D:
         self.gt = None               # np.ndarray (H,3)
         self.preds = None            # np.ndarray (H,3)
         self.preds_quat = None       # np.ndarray (H,4)
+        self.preds_force = None      # np.ndarray (H,3)
         self.probe_goal = None       # np.ndarray (3,)
         self.prediction_id = 0       # Incremented on each new prediction to cancel old ones
 
@@ -161,8 +163,13 @@ class DrawApp6D:
         print()
 
     def train_reference_6d(self, *, k=K_HIST, input_type="spherical", output_type="delta"):
-        self.ref_eq, self.ref_quat_eq = resample_trajectory_6d_equal_dt(self.ref_raw, self.ref_quat_raw, 
-                                                                       sample_hz=SAMPLE_HZ, speed=DEFAULT_SPEED)
+        self.ref_eq, self.ref_quat_eq = resample_trajectory_6d_equal_dt(
+            self.ref_raw,
+            self.ref_quat_raw,
+            sample_hz=SAMPLE_HZ,
+            speed=DEFAULT_SPEED,
+        )
+        self.ref_force_eq = None
 
         if len(self.ref_eq) < k + 2:
             print(f"[Train] Need at least {k+2} resampled points, got {len(self.ref_eq)}!")
@@ -174,8 +181,16 @@ class DrawApp6D:
             self.ref_quat_eq = moving_average_centered_6d(self.ref_quat_eq, self.smooth_win)
         ref_torch = torch.tensor(self.ref_eq, dtype=torch.float32)
         ref_quat_torch = torch.tensor(self.ref_quat_eq, dtype=torch.float32)
+        ref_force_torch = None if self.ref_force_eq is None else torch.tensor(self.ref_force_eq, dtype=torch.float32)
 
-        X, Y = build_dataset_6d(ref_torch, ref_quat_torch, k, input_type=input_type, output_type=output_type)
+        X, Y = build_dataset_6d(
+            ref_torch,
+            ref_quat_torch,
+            k,
+            input_type=input_type,
+            output_type=output_type,
+            traj_force=ref_force_torch,
+        )
         (Xtr, Ytr), (Xte, Yte), _ = time_split(X, Y, TRAIN_RATIO)
 
         self.model_info = train_gp(
@@ -242,7 +257,7 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
         # 2) Alignment
-        skill, (R, s, t) = self.skill_library.match(self.probe_eq)
+        skill, (R, s, t, _) = self.skill_library.match(self.probe_eq)
 
         self.ref_eq = skill.ref_eq
         self.model_info = skill.model
@@ -438,13 +453,16 @@ class DrawApp6D:
         # 4) Rollout in ref frame
         self.preds = None
         self.preds_quat = None
+        self.preds_force = None
 
         for attempt in range(MAX_RETRIES):
             cur_pos = probe_in_ref.copy()
             cur_quat = self.probe_quat_eq.copy()[:cur_pos.shape[0]]
+            cur_force = self.ref_force_eq.copy()[:cur_pos.shape[0]]
 
             preds_world_pos = []
             preds_world_quat = []
+            preds_world_force = []
             failed = False
 
             for step in range(ROLLOUT_HORIZON):
@@ -452,17 +470,22 @@ class DrawApp6D:
                     print("[Predict] Cancelled by new drawing.")
                     print()
                     return
-                
-                preds_ref_pos, preds_quat, _, _, vars_ref = rollout_reference_6d(
+
+                tp = torch.tensor(cur_pos, dtype=torch.float32)
+                tq = torch.tensor(cur_quat, dtype=torch.float32)
+                tf = torch.tensor(cur_force, dtype=torch.float32)
+
+                preds_ref_pos, preds_quat, preds_ref_force, _, _, _, vars_ref = rollout_reference_6d(
                     self.model_info,
-                    torch.tensor(cur_pos, dtype=torch.float32),
-                    torch.tensor(cur_quat, dtype=torch.float32),
+                    tp,
+                    tq,
                     start_t=cur_pos.shape[0] - 1,
                     h=1,
                     k=k,
                     input_type=input_type,
                     output_type=output_type,
                     R_ref_probe=self.R,
+                    traj_force=tf,
                 )
 
                 next_ref_pos = preds_ref_pos[-1].numpy()
@@ -472,10 +495,14 @@ class DrawApp6D:
 
                 preds_world_pos.append(next_world_pos)
                 preds_world_quat.append(next_world_quat)
+                if preds_ref_force is not None:
+                    next_ref_force = preds_ref_force[-1].numpy()
+                    preds_world_force.append(next_ref_force @ self.R.T)
 
                 # Update history in ref frame
                 cur_pos = np.vstack([cur_pos, next_ref_pos])
                 cur_quat = np.vstack([cur_quat, next_world_quat[None, :]])
+                cur_force = np.vstack([cur_force, next_ref_force[None, :]])
                 
                 # Truncation logic
                 if self.probe_goal is not None:
@@ -496,6 +523,7 @@ class DrawApp6D:
             if not failed:
                 preds_world_pos = np.asarray(preds_world_pos)
                 preds_world_quat = np.asarray(preds_world_quat)
+                preds_world_force = np.asarray(preds_world_force) if len(preds_world_force) else None
 
                 # Robust start selection near probe end
                 probe_end = self.probe_eq[-1]
@@ -521,6 +549,7 @@ class DrawApp6D:
 
                     self.preds = preds_world_pos[i_start:]
                     self.preds_quat = preds_world_quat[i_start:]
+                    self.preds_force = preds_world_force[i_start:] if preds_world_force is not None else None
                     break
 
             # Drop tail and retry
@@ -546,7 +575,8 @@ class DrawApp6D:
 
         self.update_pred_lines()
         plot_orientation_error(self.ref_quat_eq, self.preds_quat, j_end, self.R)
-        print(f"[Predict] Done. preds={self.preds.shape}")
+        pf = self.preds_force.shape if self.preds_force is not None else None
+        print(f"[Predict] Done. preds={self.preds.shape}, preds_force={pf}")
         print()
 
     def update_ref_lines(self):
@@ -753,7 +783,9 @@ class DrawApp6D:
         self.ref_quat_raw = self.probe_quat_raw = None
         self.ref_eq = self.probe_eq = None
         self.ref_quat_eq = self.probe_quat_eq = None
+        self.ref_force_eq = None
         self.preds = self.gt = None
+        self.preds_force = None
         self.model_info = None
         self.probe_goal = None
         self.R = self.s = self.t = None

@@ -31,10 +31,15 @@ def load_skill_csv(path, mode="6d"):
 
     name = os.path.splitext(os.path.basename(path))[0]
 
+    ref_force = None
+    if all(c in df.columns for c in ("fx", "fy", "fz")):
+        ref_force = df[["fx", "fy", "fz"]].to_numpy(dtype=np.float64)
+
     skill = Skill(
         name=name,
         ref_pos=pos,
         ref_quat=quat,
+        ref_force=ref_force,
         mode=mode,
     )
 

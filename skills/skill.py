@@ -24,6 +24,7 @@ class Skill:
         ref_pos,
         ref_quat,
         *,
+        ref_force=None,
         mode="6d",
         smooth=True,
         smooth_win=15,
@@ -36,6 +37,7 @@ class Skill:
             name: name of the skill
             ref_pos: (N,3) reference positions
             ref_quat: (N,4) reference quaternions
+            ref_force: optional (N,3) force samples aligned with ref_pos (same frame)
             smooth: whether to apply smoothing to the reference trajectory
             smooth_win: window size for smoothing (if enabled)
         """
@@ -46,10 +48,12 @@ class Skill:
         # Raw demonstrations
         self.ref_raw = np.asarray(ref_pos, dtype=np.float64)
         self.ref_quat_raw = np.asarray(ref_quat, dtype=np.float64)
+        self.ref_force_raw = None if ref_force is None else np.asarray(ref_force, dtype=np.float64)
 
         # Resampled trajectories
         self.ref_eq = None
         self.ref_quat_eq = None
+        self.ref_force_eq = None
 
         # GP model
         self.model = None
@@ -65,16 +69,28 @@ class Skill:
         """
 
         if self.mode == "6d":
-            self.ref_eq, self.ref_quat_eq = resample_trajectory_6d_equal_dt(
-                self.ref_raw,
-                self.ref_quat_raw,
-                sample_hz=SAMPLE_HZ,
-                speed=DEFAULT_SPEED,
-            )
+            if self.ref_force_raw is not None:
+                self.ref_eq, self.ref_quat_eq, self.ref_force_eq = resample_trajectory_6d_equal_dt(
+                    self.ref_raw,
+                    self.ref_quat_raw,
+                    sample_hz=SAMPLE_HZ,
+                    speed=DEFAULT_SPEED,
+                    points_force=self.ref_force_raw,
+                )
+            else:
+                self.ref_eq, self.ref_quat_eq = resample_trajectory_6d_equal_dt(
+                    self.ref_raw,
+                    self.ref_quat_raw,
+                    sample_hz=SAMPLE_HZ,
+                    speed=DEFAULT_SPEED,
+                )
+                self.ref_force_eq = None
 
             if self.smooth:
                 self.ref_eq = moving_average_centered_6d(self.ref_eq, self.smooth_win)
                 self.ref_quat_eq = moving_average_centered_6d(self.ref_quat_eq, self.smooth_win)
+                if self.ref_force_eq is not None:
+                    self.ref_force_eq = moving_average_centered_6d(self.ref_force_eq, self.smooth_win)
 
         elif self.mode == "3d":
             self.ref_eq = resample_trajectory_3d_equal_dt(
@@ -111,13 +127,15 @@ class Skill:
         if self.mode == "6d":
             ref_pos = torch.tensor(self.ref_eq, dtype=torch.float32)
             ref_quat = torch.tensor(self.ref_quat_eq, dtype=torch.float32)
-            
+            ref_force = None if self.ref_force_eq is None else torch.tensor(self.ref_force_eq, dtype=torch.float32)
+
             X, Y = build_dataset_6d(
                 ref_pos,
                 ref_quat,
                 k,
                 input_type=input_type,
                 output_type=output_type,
+                traj_force=ref_force,
             )
 
         elif self.mode == "3d":
@@ -156,11 +174,14 @@ class Skill:
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, f"{self.name}.pt")
 
-        torch.save({
+        payload = {
             "ref_eq": self.ref_eq,
             "ref_quat_eq": self.ref_quat_eq,
             "model": self.model,
-        }, path)
+        }
+        if self.ref_force_eq is not None:
+            payload["ref_force_eq"] = self.ref_force_eq
+        torch.save(payload, path)
 
     def load(self, path):
         """
@@ -173,6 +194,7 @@ class Skill:
 
         self.ref_eq = data["ref_eq"]
         self.ref_quat_eq = data["ref_quat_eq"]
+        self.ref_force_eq = data.get("ref_force_eq", None)
         self.model = data["model"]
 
     # Info
