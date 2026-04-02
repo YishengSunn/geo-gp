@@ -279,12 +279,12 @@ def rollout_reference_6d(
             if R_ref_probe is not None:
                 q_ref_probe = torch.tensor(rotmat_to_quat(R_ref_probe), dtype=torch.float32)
 
-                dq = quat_mul(quat_mul(q_ref_probe, dq), quat_inv(q_ref_probe))
+                dq = quat_mul(quat_mul(quat_inv(q_ref_probe), dq), q_ref_probe)
 
                 dq = quat_normalize(dq)
 
             # Apply delta (body frame)
-            next_q = quat_mul(dq, cur_q)
+            next_q = quat_mul(cur_q, dq)
             next_q = quat_normalize(next_q)
 
         elif output_type == 'absolute':
