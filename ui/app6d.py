@@ -207,7 +207,6 @@ class DrawApp6D:
         k=K_HIST,
         input_type="spherical",
         output_type="delta",
-        n_align=10
     ):
         """
         Process the drawn probe trajectory and perform prediction.
@@ -216,7 +215,6 @@ class DrawApp6D:
             k: int, history length for GP input
             input_type: str, type of input representation
             output_type: str, type of output representation
-            n_align: int, number of points to use for alignment
         """
         # Cancel any running prediction
         self.prediction_id += 1
@@ -244,16 +242,10 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
         # 2) Alignment
-        skill, (R, s, t, j_end) = self.skill_library.match(self.probe_eq)
+        skill, (R, s, t) = self.skill_library.match(self.probe_eq)
 
         self.ref_eq = skill.ref_eq
         self.model_info = skill.model
-
-        # na = min(n_align, len(self.ref_eq), len(self.probe_eq))
-        # if na < 3:
-        #     print("[Predict] Not enough points for alignment!")
-        #     print()
-        #     return
 
         # R, s, t = estimate_rotation_scale_3d_search_by_count(
         #     self.ref_eq,
@@ -270,7 +262,6 @@ class DrawApp6D:
 
         # 4) Rollout in ref frame
         self.preds = None
-        steps_left = len(self.ref_eq) - len(self.probe_eq)
 
         for attempt in range(MAX_RETRIES):
             cur_hist = probe_in_ref.copy()
@@ -378,7 +369,6 @@ class DrawApp6D:
         k=K_HIST,
         input_type="spherical",
         output_type="delta",
-        n_align=10
     ):
         """
         Process the drawn probe trajectory with orientations and perform 6D prediction.
@@ -387,7 +377,6 @@ class DrawApp6D:
             k: int, history length for GP input
             input_type: str, type of input representation
             output_type: str, type of output representation
-            n_align: int, number of points to use for alignment
         """
         # Cancel any running prediction
         self.prediction_id += 1
