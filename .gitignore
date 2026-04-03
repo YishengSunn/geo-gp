@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 **/.DS_Store
 
+# VSCode files
+.vscode/
+
 # Data files
 # /data/
 # *.csv
