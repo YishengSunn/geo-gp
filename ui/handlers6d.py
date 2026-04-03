@@ -82,6 +82,7 @@ def on_key(app6d, event):
         app6d.prediction_id += 1
         app6d.ref_raw = app6d.ref_eq = []
         app6d.ref_quat_raw = app6d.ref_quat_eq = None
+        app6d.ref_force_raw = app6d.ref_force_eq = None
         app6d.ref_legend.set_color("tab:red")
         app6d.line_ref_xy.set_color("tab:red")
         app6d.line_ref_3d.set_color("tab:red")
@@ -93,6 +94,7 @@ def on_key(app6d, event):
         app6d.prediction_id += 1
         app6d.probe_raw = app6d.probe_eq = []
         app6d.probe_quat_raw = app6d.probe_quat_eq = None
+        app6d.probe_force_raw = app6d.probe_force_eq = None
         app6d.preds = app6d.gt = None
         app6d.update_probe_lines()
         app6d.update_pred_lines()
