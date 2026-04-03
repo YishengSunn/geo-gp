@@ -35,11 +35,11 @@ def so3_log(R, eps: float = 1e-8):
     Output type matches input type.
 
     Args:
-        R: (3,3) rotation matrix (torch.Tensor or np.ndarray)
+        R: (3,3) rotation matrix
         eps: float, numerical stability threshold
 
     Returns:
-        omega: (3,) rotation vector in so(3) (torch.Tensor or np.ndarray
+        omega: (3,) rotation vector in so(3)
     """
     use_torch = is_torch(R)
 
@@ -82,11 +82,11 @@ def so3_exp(omega, eps: float = 1e-8):
     Output type matches input type.
 
     Args:
-        omega: (3,) rotation vector in so(3) (torch.Tensor or np.ndarray)
+        omega: (3,) rotation vector in so(3)
         eps: float, numerical stability threshold
 
     Returns:
-        R: (3,3) rotation matrix (torch.Tensor or np.ndarray)
+        R: (3,3) rotation matrix
     """
     use_torch = is_torch(omega)
 

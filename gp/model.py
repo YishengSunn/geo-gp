@@ -1,21 +1,20 @@
-import numpy as np
 import torch
+import numpy as np
 
 from config.runtime import ( 
     NEAREST_K, MAX_EXPERTS, MAX_DATA_PER_EXPERT, MIN_POINTS_OFFLINE, WINDOW_SIZE,
     METHOD_ID, METHOD_HPARAM
 )
-from utils.so3 import so3_exp
-from geometry.features import (
-    spherical_feat_from_xyz_torch, 
-    direction_feat_from_xyz_torch
-)
+from geometry.features import spherical_feat_from_xyz_torch, direction_feat_from_xyz_torch
 from gp.skygp_moe import SkyGP_MOE
 from utils.quaternion import rotmat_to_quat, quat_mul, quat_inv, quat_normalize
 from utils.misc import torch_to_np, Standardizer
 
 
-def train_gp(dataset, method_id=METHOD_ID):
+def train_gp(
+    dataset: dict[str, torch.Tensor],
+    method_id: int = METHOD_ID,
+) -> dict[str, object]:
     """
     Train GP model on the dataset.
 
@@ -26,7 +25,7 @@ def train_gp(dataset, method_id=METHOD_ID):
     Returns:
         dict with 'gp_model', 'scaler', 'input_dim'
     """
-    Xtr = dataset['X_train']; Ytr = dataset['Y_train']
+    Xtr, Ytr = dataset['X_train'], dataset['Y_train']
     Din = Xtr.shape[1]
     Dout = Ytr.shape[1]
 
@@ -59,7 +58,10 @@ def train_gp(dataset, method_id=METHOD_ID):
                     
     return {'gp_model': gp_model, 'scaler': scaler, 'input_dim': Din}
 
-def gp_predict(info, feat_1xD):
+def gp_predict(
+    info: dict[str, object],
+    feat_1xD: torch.Tensor,
+) -> tuple[np.ndarray, float]:
     """
     GP prediction for a single input feature vector.
 
@@ -79,17 +81,17 @@ def gp_predict(info, feat_1xD):
     mu = np.array(mu).reshape(1, -1)  # Ensure shape is (1, D_out)
     y = torch_to_np(scaler.y_inverse(torch.tensor(mu)))  # Shape: (1, D_out)
 
-    return y, var  # Return numpy with shape (1, D_out)
+    return y, var
 
 def rollout_reference_3d(
-    model_info,
-    traj,
-    start_t,
-    h,
-    k,
-    input_type='delta',
-    output_type='delta',
-):
+    model_info: dict[str, object],
+    traj: torch.Tensor,
+    start_t: int,
+    h: int,
+    k: int,
+    input_type: str = 'delta',
+    output_type: str = 'delta',
+) -> tuple[torch.Tensor, torch.Tensor, int, np.ndarray]:
     """
     3D rollout trajectory using GP model from a given start time for h steps.
 
@@ -99,12 +101,12 @@ def rollout_reference_3d(
         start_t: int, starting time index (position index)
         h: int, rollout horizon (number of future steps)
         k: int, history length (number of past deltas)
-        input_type: 'delta', 'pos', 'pos+delta', 'spehrical', or 'spherical+delta'
-        output_type: 'delta' or 'absolute'
+        input_type: input feature type ('delta', 'pos', 'pos+delta', 'spherical', 'spherical+delta', 'dir')
+        output_type: output feature type ('delta', 'absolute')
 
     Returns:
-        preds: torch tensor of shape (h, 3)   # Predicted positions
-        gt: torch tensor of shape (h, 3)      # Ground truth positions
+        preds: torch tensor of shape (h, 3)
+        gt: torch tensor of shape (h, 3)
         h: int
         vars_seq: numpy array of shape (h,)
     """
@@ -114,7 +116,7 @@ def rollout_reference_3d(
     T = traj.shape[0]
     h = max(0, h)
 
-    deltas = traj[1:] - traj[:-1]  # (T-1, 3)
+    deltas = traj[1:] - traj[:-1]
     global_origin = traj[0]
 
     preds_pos = []
@@ -124,11 +126,11 @@ def rollout_reference_3d(
     cur_pos = traj[start_t].clone()
 
     # Rolling buffers (will be updated autoregressively)
-    hist_pos = traj[start_t-k+1:start_t+1].clone()  # (k, 3)
-    hist_del = deltas[start_t-k:start_t].clone()  # (k, 3)
+    hist_pos = traj[start_t-k+1:start_t+1].clone()
+    hist_del = deltas[start_t-k:start_t].clone()
 
     for _ in range(h):
-        # Build input x
+        # Build input features
         if input_type == 'delta':
             x = hist_del.reshape(1, -1)
 
@@ -155,7 +157,7 @@ def rollout_reference_3d(
 
         # GP prediction
         y_pred, var = gp_predict(model_info, x)
-        y_pred = torch.tensor(y_pred, dtype=torch.float32)[0]  # (3,)
+        y_pred = torch.tensor(y_pred, dtype=torch.float32)[0]
         vars_seq.append(var)
 
         # Integrate
@@ -183,18 +185,20 @@ def rollout_reference_3d(
     return preds, gt, h, np.array(vars_seq)
 
 def rollout_reference_6d(
-    model_info,
-    traj_pos,
-    traj_quat,
-    start_t,
-    h,
-    k,
-    input_type='spherical',
-    output_type='delta',
-    R_ref_probe=None,
-):
+    model_info: dict[str, object],
+    traj_pos: torch.Tensor,
+    traj_quat: torch.Tensor,
+    start_t: int,
+    h: int,
+    k: int,
+    input_type: str = 'spherical',
+    output_type: str = 'delta',
+    R_ref_probe: np.ndarray | None = None,
+    traj_force: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor, torch.Tensor, torch.Tensor | None, np.ndarray]:
     """
-    6D rollout trajectory (position + orientation) using GP model from a given start time for h steps.
+    6D rollout trajectory (position + orientation, and optionally force) 
+    using GP model from a given start time for h steps.
 
     Args:
         model_info: dict with 'gp_model' and 'scaler'
@@ -203,37 +207,54 @@ def rollout_reference_6d(
         start_t: int, starting time index (position index)
         h: int, rollout horizon (number of future steps)
         k: int, history length (number of past deltas)
-        input_type: 'delta', 'pos', 'pos+delta', 'spherical', or 'spherical+delta'
-        output_type: 'delta' or 'absolute'
+        input_type: input feature type ('delta', 'pos', 'pos+delta', 'spherical', 'spherical+delta', 'dir')
+        output_type: output feature type ('delta', 'absolute')
         R_ref_probe: (3, 3) rotation matrix, reference to probe frame rotation
+        traj_force: optional (T, 3) force aligned with traj_pos
 
     Returns:
         preds_pos: torch tensor of shape (h, 3), predicted positions
         preds_quat: torch tensor of shape (h, 4), predicted orientations (quaternions)
+        preds_force: torch tensor of shape (h, 3) if model has force outputs and traj_force was given, else None
         gt_pos: torch tensor of shape (h, 3), ground truth positions
         gt_quat: torch tensor of shape (h, 4), ground truth orientations (quaternions)
+        gt_force: same condition as preds_force
         vars_seq: numpy array of shape (h,), variance at each step
     """
     assert traj_pos.ndim == 2 and traj_pos.shape[1] == 3, f"Expected traj_pos shape (T,3), got {traj_pos.shape}"
     assert traj_quat.ndim == 2 and traj_quat.shape[1] == 4, f"Expected traj_quat shape (T,4), got {traj_quat.shape}"
     assert start_t >= k, f"Expected start_t >= k, got start_t={start_t}, k={k}"
 
+    d_out = int(model_info['scaler'].Y_mean.shape[0])
+    emit_force = traj_force is not None and (d_out >= 10)
+
     R_ref_probe = torch.tensor(R_ref_probe, dtype=torch.float32) if R_ref_probe is not None else None
+
+    T = traj_pos.shape[0]
+    if not emit_force:
+        traj_force = torch.zeros((T, 3), dtype=traj_pos.dtype, device=traj_pos.device)
+    else:
+        assert traj_force.shape == (T, 3), f"Expected traj_force ({T},3), got {traj_force.shape}"
+        traj_force = traj_force.to(device=traj_pos.device, dtype=traj_pos.dtype)
 
     global_origin = traj_pos[0]
 
+    # Current state (x_t)
     cur_pos = traj_pos[start_t].clone()
     cur_q = traj_quat[start_t].clone()
+    cur_force = traj_force[start_t].clone()
 
+    # Rolling buffers (will be updated autoregressively)
     hist_pos = traj_pos[start_t-k+1:start_t+1].clone()
     hist_del = (traj_pos[1:] - traj_pos[:-1])[start_t-k:start_t].clone()
 
     preds_pos = []
     preds_quat = []
+    preds_force = [] if emit_force else None
     vars_seq = []
 
     for _ in range(h):
-        # Input feature construction
+        # Build input features
         if input_type == 'delta':
             x_pos = hist_del.reshape(1, -1)
 
@@ -258,17 +279,24 @@ def rollout_reference_6d(
         else:
             raise ValueError(f"Unsupported input_type: {input_type}")
 
-        # GP prediction (6D output)
+        # GP prediction
         y_pred, var = gp_predict(model_info, x_pos)
         y_pred = torch.tensor(y_pred, dtype=torch.float32)[0]
         vars_seq.append(var)
 
+        if d_out == 7:
+            y_pose = y_pred
+            d_force_pred = None
+        else:
+            y_pose = y_pred[:7]
+            d_force_pred = y_pred[7:10]
+
         # Output integration
         if output_type == 'delta':
-            delta_world = y_pred[:3]
+            delta_world = y_pose[:3]
             next_pos = cur_pos + delta_world
 
-            dq = y_pred[3:]
+            dq = y_pose[3:7]
 
             # Ensure shortest representation
             if dq[0] < 0:
@@ -278,46 +306,59 @@ def rollout_reference_6d(
             # Transform delta to probe frame
             if R_ref_probe is not None:
                 q_ref_probe = torch.tensor(rotmat_to_quat(R_ref_probe), dtype=torch.float32)
-
-                dq = quat_mul(quat_mul(q_ref_probe, dq), quat_inv(q_ref_probe))
-
+                dq = quat_mul(quat_mul(quat_inv(q_ref_probe), dq), q_ref_probe)
                 dq = quat_normalize(dq)
 
             # Apply delta (body frame)
-            next_q = quat_mul(dq, cur_q)
+            next_q = quat_mul(cur_q, dq)
             next_q = quat_normalize(next_q)
 
+            if emit_force:
+                next_force = cur_force + d_force_pred @ R_ref_probe.T
+
         elif output_type == 'absolute':
-            next_pos = y_pred[:3]
-            next_q = quat_normalize(y_pred[3:])
+            next_pos = y_pose[:3]
+            next_q = quat_normalize(y_pose[3:7])
 
             if R_ref_probe is not None:
                 q_ref_probe = torch.tensor(rotmat_to_quat(R_ref_probe), dtype=torch.float32)
-
                 next_q = quat_mul(q_ref_probe, next_q)
-
                 next_q = quat_normalize(next_q)
 
             delta_world = next_pos - cur_pos
 
+            if emit_force:
+                next_force = d_force_pred
+
         else:
             raise ValueError(f"Unsupported output_type: {output_type}")
 
-        # Save predictions
         preds_pos.append(next_pos)
         preds_quat.append(next_q)
+        if emit_force:
+            preds_force.append(next_force)
 
-        # Update history for next step
+        # Update rolling buffers
         hist_pos = torch.cat([hist_pos[1:], next_pos.unsqueeze(0)], dim=0)
         hist_del = torch.cat([hist_del[1:], delta_world.unsqueeze(0)], dim=0)
 
         cur_pos = next_pos
         cur_q = next_q
+        if emit_force and next_force is not None:
+            cur_force = next_force
 
     preds_pos = torch.stack(preds_pos, dim=0)
     preds_quat = torch.stack(preds_quat, dim=0)
+    if emit_force:
+        preds_force_t = torch.stack(preds_force, dim=0)
+    else:
+        preds_force_t = None
 
     gt_pos = traj_pos[start_t+1:start_t+1+h]
     gt_quat = traj_quat[start_t+1:start_t+1+h]
+    if emit_force:
+        gt_force_t = traj_force[start_t+1:start_t+1+h]
+    else:
+        gt_force_t = None
 
-    return preds_pos, preds_quat, gt_pos, gt_quat, np.array(vars_seq)
+    return preds_pos, preds_quat, preds_force_t, gt_pos, gt_quat, gt_force_t, np.array(vars_seq)

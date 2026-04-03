@@ -1,7 +1,7 @@
 import numpy as np
 
 from geometry.frame6d import estimate_rotation_scale_3d_search_by_count
-from geometry.metrics import geom_mse
+from skills.skill import Skill
 
 
 class SkillLibrary:
@@ -18,7 +18,7 @@ class SkillLibrary:
         self.skills = []
 
     # Add skill
-    def add_skill(self, skill):
+    def add_skill(self, skill: Skill):
         """
         Add a skill to the library.
         
@@ -31,9 +31,9 @@ class SkillLibrary:
     def train_all(
         self,
         *,
-        k,
-        input_type="spherical",
-        output_type="delta",
+        k: int,
+        input_type: str = "spherical",
+        output_type: str = "delta",
     ):
         """
         Train GP models for all skills in the library.
@@ -55,11 +55,11 @@ class SkillLibrary:
     # Matching
     def match(
         self,
-        probe_eq,
+        probe_eq: np.ndarray,
         *,
-        margin_pts=300,
-        step=10,
-    ):
+        margin_pts: int = 300,
+        step: int = 10,
+    ) -> tuple[Skill, tuple[np.ndarray, float, float, float, int]]:
         """
         Match a probe trajectory to the best skill in the library.
 
@@ -104,10 +104,8 @@ class SkillLibrary:
         return best_skill, best_align
 
     # Info
-    def __len__(self):
-
+    def __len__(self) -> int:
         return len(self.skills)
 
-    def __repr__(self):
-
+    def __repr__(self) -> str:
         return f"SkillLibrary(n_skills={len(self.skills)})"

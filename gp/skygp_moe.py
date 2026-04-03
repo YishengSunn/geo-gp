@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import minimize
 from scipy.linalg import solve_triangular
 
 
@@ -52,7 +51,7 @@ class SkyGP_MOE:
         self.WINDOW_SIZE = int(window_size) if window_size is not None else None
         self.LIGHT_MAXITER = int(light_maxiter)
         
-        # ===== Shared hyperparameters =====
+        # Shared hyperparameters
         self.global_params = None   # {'log_sigma_f', 'log_sigma_n', 'log_lengthscale'}
         self._since_global_opt = 0  # 新增样本计数（触发全局优化）
 
@@ -172,7 +171,7 @@ class SkyGP_MOE:
         self.update_param_incremental(x, y, model)
 
         # 在线优化触发（只优化该专家，不共享）
-        # —— 改为“全局触发”：累计一定数量新样本后做一次全局共享超参优化 ——
+        # 改为“全局触发”：累计一定数量新样本后做一次全局共享超参优化
         self._since_global_opt += 1
         total_pts = sum(self.localCount)
         if (total_pts >= self.MIN_POINTS) and (self._since_global_opt % self.BATCH_STEP == 0):
@@ -337,6 +336,7 @@ class SkyGP_MOE:
         # var_moe = np.sum(weights * vars_, axis=0)
         # var_moe = np.clip(var_moe, 1e-6, 1e6)
         # return mu_moe, var_moe
+
         mus = np.stack(mus)
         vars_ = np.stack(vars_)
         inv_vars = 1.0 / (vars_ + 1e-9)
@@ -550,7 +550,7 @@ class SkyGP_MOE:
         max_iter=60,          # 这里当成 Adam 的步数 steps
         verbose=False,
         window_size=None,
-        adam_lr=0.00001,      # ✅ Adam 学习率
+        adam_lr=0.00001,      # Adam 学习率
         weight_decay=0.0,     # 可选 L2 正则
         jitter=1e-6           # 数值稳定的抖动
     ):
@@ -567,7 +567,7 @@ class SkyGP_MOE:
                 print(f"[opt-Adam] expert {expert_idx} n={n} 太少，跳过")
             return False
 
-        # ------- 取最近 window_size 个样本 -------
+        # 取最近 window_size 个样本
         if window_size is not None and n > window_size:
             start = n - window_size
         else:
@@ -576,7 +576,7 @@ class SkyGP_MOE:
         y_np = self.Y_list[expert_idx][p, start:n].copy()     # (m,)
         D, m = X_np.shape
 
-        # ------- 取当前超参作为初始化 -------
+        # 取当前超参作为初始化
         params = self.model_params[expert_idx]
         log_sigma_f_np = params['log_sigma_f'][p]
         log_sigma_n_np = params['log_sigma_n'][p]
@@ -585,7 +585,7 @@ class SkyGP_MOE:
         else:
             log_lengthscale_np = params['log_lengthscale'][:, p].copy()  # (D,)
 
-        # ------- 转 torch（双精度，更稳） -------
+        # 转 torch（双精度，更稳）
         device = torch.device("cpu")
         X = torch.tensor(X_np, dtype=torch.float64, device=device)       # (D, m)
         y = torch.tensor(y_np, dtype=torch.float64, device=device)       # (m,)
@@ -638,12 +638,12 @@ class SkyGP_MOE:
 
             opt.step()
 
-            losses.append(loss.item())  # ✅ 收集每一步的 loss
+            losses.append(loss.item())  # 收集每一步的 loss
 
             if verbose and (step % 10 == 0 or step == max_iter - 1):
                 print(f"[opt-Adam] expert {expert_idx}, out {p}, step {step:03d}, mll={mll.item():.4f}, lr={adam_lr}")
 
-        # ------- loss 可视化 --------
+        # loss 可视化
         if verbose:
             plt.figure(figsize=(6, 3))
             plt.plot(losses, label=f"Expert {expert_idx}, Output {p}")
@@ -655,7 +655,7 @@ class SkyGP_MOE:
 
         success = True
 
-        # ------- 回填到 numpy -------
+        # 回填到 numpy
         params['log_sigma_f'][p] = float(log_sigma_f.detach().cpu().numpy())
         params['log_sigma_n'][p] = float(log_sigma_n.detach().cpu().numpy())
         if self.y_dim == 1:
@@ -776,7 +776,7 @@ class SkyGP_MOE:
             return False
 
         device = torch.device("cpu")
-        # --- 共享 log 超参（torch 参数） ---
+        # 共享 log 超参（torch 参数）
         log_sigma_f = torch.nn.Parameter(
             torch.tensor(self.global_params['log_sigma_f'], dtype=torch.float64, device=device)
         )

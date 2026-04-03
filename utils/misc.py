@@ -1,10 +1,13 @@
 import csv
+import torch
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-from scipy.spatial.transform import Rotation as R, Slerp
 
-from utils.quaternion import rotmat_to_quat, quat_mul, quat_inv, quat_normalize, quat_log, quat_exp
+from utils.quaternion import (
+    rotmat_to_quat, quat_mul, quat_inv, quat_normalize,
+    quat_log, quat_exp, quat_slerp
+)
 
 
 # ============================================================
@@ -12,55 +15,58 @@ from utils.quaternion import rotmat_to_quat, quat_mul, quat_inv, quat_normalize,
 # ============================================================
 
 class Standardizer:
-    def fit(self, X, Y):
+    def fit(self, X: torch.Tensor, Y: torch.Tensor) -> "Standardizer":
         """
         Fit standardizer to data
 
         Args:
-            X: input data, torch tensor of shape (N, D_in)
-            Y: output data, torch tensor of shape (N, D_out)
+            X: input data, torch.Tensor of shape (N, D_in)
+            Y: output data, torch.Tensor of shape (N, D_out)
             
         Returns:
             self
         """
-        self.X_mean = X.mean(0)  # Shape: (D_in,)
+        self.X_mean = X.mean(0)                # Shape: (D_in,)
         self.X_std = X.std(0).clamp_min(1e-8)  # Shape: (D_in,)
-        self.Y_mean = Y.mean(0)  # Shape: (D_out,)
+        self.Y_mean = Y.mean(0)                # Shape: (D_out,)
         self.Y_std = Y.std(0).clamp_min(1e-8)  # Shape: (D_out,)
 
         return self
 
-    def x_transform(self, X): return (X - self.X_mean) / self.X_std
+    def x_transform(self, X: torch.Tensor) -> torch.Tensor: return (X - self.X_mean) / self.X_std
 
-    def y_transform(self, Y): return (Y - self.Y_mean) / self.Y_std
+    def y_transform(self, Y: torch.Tensor) -> torch.Tensor: return (Y - self.Y_mean) / self.Y_std
 
-    def y_inverse_transform(self, Yn):
+    def y_inverse_transform(self, Yn: torch.Tensor) -> torch.Tensor:
         """
         Inverse transform standardized output
+
         Args:
-            Yn: standardized output, torch tensor of shape (..., D_out)
+            Yn: standardized output, torch.Tensor of shape (..., D_out)
+
         Returns:
-            Y: original output, torch tensor of shape (..., D_out)
+            Y: original output, torch.Tensor of shape (..., D_out)
         """
-        assert Yn.shape[-1] == self.Y_std.shape[0], f"维度不匹配: Yn.shape={Yn.shape}, std={self.Y_std.shape}"
+        assert Yn.shape[-1] == self.Y_std.shape[0], f"Dimension mismatch: Yn.shape={Yn.shape}, std={self.Y_std.shape}"
 
         return Yn * self.Y_std + self.Y_mean
 
     # Compatible with old interface
-    def y_inverse(self, Yn): return self.y_inverse_transform(Yn)
+    def y_inverse(self, Yn: torch.Tensor) -> torch.Tensor: return self.y_inverse_transform(Yn)
 
 # ============================================================
 # Tensor/Array conversion helpers
 # ============================================================
 
-def torch_to_np(x):
+def torch_to_np(x: torch.Tensor) -> np.ndarray:
     """
     Convert torch tensor to numpy array
     
     Args:
-        x: torch tensor
+        x: torch.Tensor
+
     Returns:
-        numpy array
+        np.ndarray
     """
     return x.detach().cpu().numpy()
 
@@ -68,16 +74,16 @@ def torch_to_np(x):
 # Smoothing helpers (post-processing)
 # ============================================================
 
-def moving_average_centered_pos(arr, win):
+def moving_average_centered_pos(arr: np.ndarray, win: int) -> np.ndarray:
     """
     Centered moving average smoothing along time axis (axis=0).
 
     Args:
-        arr: (N, d) array-like
+        arr: (N, d) np.ndarray
         win: int, window size (odd preferred)
 
     Returns:
-        out: (N, d) smoothed array
+        out: (N, d) np.ndarray, smoothed array
     """
     arr = np.asarray(arr, dtype=np.float64)
     if arr.ndim == 1:
@@ -103,16 +109,16 @@ def moving_average_centered_pos(arr, win):
         
     return out
 
-def moving_average_centered_orient(arr, win):
+def moving_average_centered_orient(arr: np.ndarray, win: int) -> np.ndarray:
     """
     Centered moving average smoothing along time axis (axis=0).
 
     Args:
-        arr: (N, d) array-like
+        arr: (N, d) np.ndarray
         win: int, window size (odd preferred)
 
     Returns:
-        out: (N, d) smoothed array
+        out: (N, d) np.ndarray, smoothed array
     """
     arr = np.asarray(arr, dtype=np.float64)
 
@@ -131,7 +137,7 @@ def moving_average_centered_orient(arr, win):
     if N <= win:
         return arr.copy()
 
-    # Reflect padding along time axis
+    # Padding along time axis
     kernel = np.ones(win, dtype=np.float64) / float(win)
     out = arr.copy()
 
@@ -141,7 +147,7 @@ def moving_average_centered_orient(arr, win):
         
     return out
 
-def moving_average_centered_6d(arr, win):
+def moving_average_centered_6d(arr: np.ndarray, win: int) -> np.ndarray:
     """
     Centered moving average smoothing along time axis (axis=0).
 
@@ -150,11 +156,11 @@ def moving_average_centered_6d(arr, win):
     - (N, 4) quaternions via log-exp smoothing
 
     Args:
-        arr: array-like
+        arr: np.ndarray of shape (N, d)
         win: int, window size (odd preferred)
 
     Returns:
-        out: smoothed array, same shape as input
+        out: np.ndarray of shape (N, d), smoothed array
     """
     arr = np.asarray(arr, dtype=np.float64)
 
@@ -191,14 +197,14 @@ def smooth_prediction_by_velocity(
     first velocity to preserve the probe's exiting direction.
 
     Args:
-        probe_xy: (Np, D) probe points in world/probe frame
-        pred_xy: (Hp, D) predicted points in world/probe frame (future, starting AFTER probe end)
-        win: centered moving-average window (odd preferred)
-        blend_first_step: blend factor for the first predicted delta:
+        probe: (Np, D) np.ndarray, probe points in world/probe frame
+        pred: (Hp, D) np.ndarray, predicted points in world/probe frame (future, starting AFTER probe end)
+        win: int, centered moving-average window (odd preferred)
+        blend_first_step: float, blend factor for the first predicted delta:
             v0_smooth = blend_first_step * v0_probe + (1-blend_first_step) * v0_pred
 
     Returns:
-        pred_xy_smooth: (Hp, D) smoothed predicted points in world/probe frame
+        pred_smooth: (Hp, D) np.ndarray, smoothed predicted points in world/probe frame
     """
     probe = np.asarray(probe, dtype=np.float64)
     pred = np.asarray(pred, dtype=np.float64)
@@ -251,18 +257,18 @@ def smooth_prediction_by_twist_6d(
     This keeps continuity w.r.t. the last probe pose and blends the first step to preserve the exiting direction (both translation and rotation).
 
     Args:
-        probe_pos: (Np, 3) probe positions up to current time
-        probe_quat: (Np, 4) probe rotations as quaternions up to current time
-        pred_pos: (Hp, 3) predicted future positions (starting after probe end)
-        pred_quat: (Hp, 4) predicted future rotations as quaternions (starting after probe end)
-        win: centered moving-average window (odd preferred)
-        blend_first_step_pos: blend factor for first Δp
-        blend_first_step_rot: blend factor for first ω
-        eps: numerical threshold
+        probe_pos: (Np, 3) np.ndarray, probe positions up to current time
+        probe_quat: (Np, 4) np.ndarray, probe rotations as quaternions up to current time
+        pred_pos: (Hp, 3) np.ndarray, predicted future positions (starting after probe end)
+        pred_quat: (Hp, 4) np.ndarray, predicted future rotations as quaternions (starting after probe end)
+        win: int, centered moving-average window (odd preferred)
+        blend_first_step_pos: float, blend factor for first Δp
+        blend_first_step_rot: float, blend factor for first ω
+        eps: float, numerical threshold
 
     Returns:
-        pred_pos_s: (Hp, 3) smoothed predicted positions
-        pred_quat_s: (Hp, 4) smoothed predicted rotations as quaternions (still normalized)
+        pred_pos_s: (Hp, 3) np.ndarray, smoothed predicted positions
+        pred_quat_s: (Hp, 4) np.ndarray, smoothed predicted rotations as quaternions (still normalized)
     """
     probe_pos = np.asarray(probe_pos, dtype=np.float64)
     pred_pos  = np.asarray(pred_pos,  dtype=np.float64)
@@ -340,14 +346,14 @@ def smooth_prediction_by_twist_6d(
 # Save helpers
 # ============================================================
 
-def process_csv(input_path, output_path, freq=20, downsample=5):
+def process_csv(input_path: str, output_path: str, freq: int = 20, downsample: int = 5):
     """
     Process raw CSV file by adding time column and downsampling.
 
     Args:
-    - input_path: path to raw CSV file with columns [time, x, y, z, qx, qy, qz, qw]
-    - output_path: path to save processed CSV
-    - freq: frequency of the trajectory (for generating time column if not present)
+    - input_path: str, path to raw CSV file with columns [time, x, y, z, qx, qy, qz, qw]
+    - output_path: str, path to save processed CSV
+    - freq: int, frequency of the trajectory (for generating time column if not present)
     - downsample: int, if > 1, take every N-th row for downsampling
     """
     df = pd.read_csv(input_path)
@@ -363,20 +369,20 @@ def process_csv(input_path, output_path, freq=20, downsample=5):
     print(f"[Process CSV] Processed CSV saved to {output_path}")
 
 def save_reference_raw_to_csv(
-    filepath,
-    ref_pos,
-    ref_quat,
+    filepath: str,
+    ref_pos: np.ndarray,
+    ref_quat: np.ndarray,
     *,
-    dt=0.05,
+    dt: float = 0.05,
 ):
     """
     Save raw reference trajectory (position + quaternion) to CSV.
 
     Args:
-        filepath: output CSV file path
-        ref_pos: (N,3) reference positions
-        ref_quat: (N,4) reference orientations [w,x,y,z]
-        dt: time step between points
+        filepath: str, output CSV file path
+        ref_pos: (N,3) np.ndarray, reference positions
+        ref_quat: (N,4) np.ndarray, reference orientations [w,x,y,z]
+        dt: float, time step between points
     """
     if ref_pos is None:
         raise ValueError("ref_pos is None")
@@ -421,20 +427,20 @@ def save_reference_raw_to_csv(
     print(f"[Save] Reference raw trajectory saved to {filepath}")
 
 def save_predictions_to_csv(
-    filepath,
-    preds,
-    preds_quat,
+    filepath: str,
+    preds: np.ndarray,
+    preds_quat: np.ndarray,
     *,
-    dt=0.005,
+    dt: float = 0.005,
 ):
     """
     Save GP predicted trajectory (position + quaternion) to CSV.
 
     Args:
-        filepath: output CSV file path
-        preds: (N, 3) predicted positions
-        preds_quat: (N, 4) predicted orientations as quaternions [w, x, y, z]
-        dt: time step between predictions (for generating timestamps)
+        filepath: str, output CSV file path
+        preds: (N, 3) np.ndarray, predicted positions
+        preds_quat: (N, 4) np.ndarray, predicted orientations as quaternions [w, x, y, z]
+        dt: float, time step between predictions (for generating timestamps)
     """
     if preds is None or preds_quat is None:
         raise ValueError("preds or preds_quat is None")
@@ -473,15 +479,60 @@ def save_predictions_to_csv(
 # Plot helpers
 # ============================================================
 
-def plot_orientation_error(ref_quat, preds_quat, start_idx, R_ref_probe):
+def piecewise_quat_slerp_path(ref_seg: np.ndarray, t_samples: np.ndarray) -> np.ndarray:
+    """
+    Piecewise SLERP along ref_seg keyframes in [w,x,y,z], parameter t in [0,1]
+    from first to last quaternion.
+
+    Args:
+        ref_seg: (M, 4) np.ndarray, reference quaternions [w, x, y, z]
+        t_samples: (H,) np.ndarray, time samples in [0,1]
+
+    Returns:
+        out: (H, 4) np.ndarray, interpolated quaternions [w, x, y, z]
+    """
+    ref_seg = np.asarray(ref_seg, dtype=np.float64)
+    t_samples = np.asarray(t_samples, dtype=np.float64)
+
+    M = ref_seg.shape[0]
+    H = len(t_samples)
+    if M < 2:
+        raise ValueError("Reference segment too short")
+    
+    t_keys = np.linspace(0.0, 1.0, M)
+    out = np.empty((H, 4), dtype=np.float64)
+    for i in range(H):
+        t = float(np.clip(t_samples[i], 0.0, 1.0))
+        if t <= t_keys[0]:
+            out[i] = quat_normalize(ref_seg[0])
+        elif t >= t_keys[-1]:
+            out[i] = quat_normalize(ref_seg[-1])
+        else:
+            j = int(np.searchsorted(t_keys, t, side="right") - 1)
+            j = min(max(j, 0), M - 2)
+            t0, t1 = t_keys[j], t_keys[j + 1]
+            u = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+            out[i] = quat_slerp(ref_seg[j], ref_seg[j + 1], u)
+    return out
+
+def plot_orientation_error(
+    ref_quat: np.ndarray,
+    preds_quat: np.ndarray,
+    start_idx: int,
+    R_ref_probe: np.ndarray,
+) -> np.ndarray:
     """
     Plot orientation error trend between reference and predicted quaternions, 
     after SLERP alignment and removing initial offset.
 
     Args:
-        ref_quat: (N, 4) reference rotations as quaternions [w, x, y, z]
-        preds_quat: (H, 4) predicted rotations as quaternions [w, x, y, z]
+        ref_quat: (N, 4) np.ndarray, reference rotations as quaternions [w, x, y, z]
+        preds_quat: (H, 4) np.ndarray, predicted rotations as quaternions [w, x, y, z]
         start_idx: int, index in reference where prediction starts (after probe end)
+        R_ref_probe: (3, 3) np.ndarray, reference to probe frame rotation
+
+    Returns:
+        errors: (H,) np.ndarray, orientation error trend in degrees
     """
     ref_quat = np.asarray(ref_quat, dtype=np.float64)
     preds_quat = np.asarray(preds_quat, dtype=np.float64)
@@ -494,14 +545,8 @@ def plot_orientation_error(ref_quat, preds_quat, start_idx, R_ref_probe):
     if len(ref_seg) < 2:
         raise ValueError("Reference segment too short")
 
-    # SLERP alignment in quaternion space
-    ref_R = R.from_quat(ref_seg[:, [1,2,3,0]])
-
-    ref_progress = np.linspace(0, 1, len(ref_seg))
     pred_progress = np.linspace(0, 1, H)
-
-    slerp = Slerp(ref_progress, ref_R)
-    ref_interp = (slerp(pred_progress).as_quat())[:, [3,0,1,2]]
+    ref_interp = piecewise_quat_slerp_path(ref_seg, pred_progress)
 
     q_ref0 = ref_interp[0]
     q_pred0 = preds_quat[0]

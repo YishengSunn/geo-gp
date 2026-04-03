@@ -6,18 +6,18 @@ from skills.skill import Skill
 
 
 # Load one skill from CSV
-def load_skill_csv(path, mode="6d"):
+def load_skill_csv(path: str, mode: str = "6d") -> Skill:
     """
     Load a skill from a CSV file. The CSV is expected to have columns: x,y,z,qx,qy,qz,qw 
     where (x,y,z) are positions and (qx,qy,qz,qw) are quaternions (in [x,y,z,w] format).
 
     Args:
         path: str, path to the CSV file
+        mode: str, mode of the skill ("3d" or "6d")
 
     Returns:
         skill: skill object initialized with the data from the CSV
     """
-
     df = pd.read_csv(path)
 
     pos = df[["x", "y", "z"]].to_numpy(dtype=np.float64)
@@ -31,17 +31,22 @@ def load_skill_csv(path, mode="6d"):
 
     name = os.path.splitext(os.path.basename(path))[0]
 
+    ref_force = None
+    if all(c in df.columns for c in ("fx", "fy", "fz")):
+        ref_force = df[["fx", "fy", "fz"]].to_numpy(dtype=np.float64)
+
     skill = Skill(
         name=name,
         ref_pos=pos,
         ref_quat=quat,
+        ref_force=ref_force,
         mode=mode,
     )
 
     return skill
 
 # Load all CSV skills
-def load_skills_from_folder(folder, mode="6d"):
+def load_skills_from_folder(folder: str, mode: str = "6d") -> list[Skill]:
     """
     Load all skill CSV files from a folder. Each CSV file should represent one skill.
 
@@ -51,7 +56,6 @@ def load_skills_from_folder(folder, mode="6d"):
     Returns:
         skills: list of skill objects loaded from the CSV files
     """
-
     skills = []
 
     for fname in sorted(os.listdir(folder)):
@@ -68,7 +72,7 @@ def load_skills_from_folder(folder, mode="6d"):
 
     return skills
 
-def load_skills_from_models(folder, mode="3d"):
+def load_skills_from_models(folder: str, mode: str = "3d") -> list[Skill]:
     """
     Load all pretrained skill models from a folder. Each .pt file should represent one skill.
 
@@ -99,12 +103,12 @@ def load_skills_from_models(folder, mode="3d"):
 
 # Load + train skills
 def load_and_train_skills(
-    folder,
+    folder: str,
     *,
-    k,
-    mode="6d",
-    input_type="spherical",
-    output_type="delta",
+    k: int,
+    mode: str = "6d",
+    input_type: str = "spherical",
+    output_type: str = "delta",
 ):
     """
     Load all skills from a folder and train GP models for each skill.
@@ -118,7 +122,6 @@ def load_and_train_skills(
     Returns:
         skills: list of skill objects with trained GP models
     """
-
     skills = load_skills_from_folder(folder, mode=mode)
 
     for skill in skills:
