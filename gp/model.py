@@ -309,7 +309,7 @@ def rollout_reference_6d(
             next_q = quat_normalize(next_q)
 
             if predict_force:
-                next_force = cur_force + d_force_pred
+                next_force = cur_force + d_force_pred @ R_ref_probe.T
 
         elif output_type == 'absolute':
             next_pos = y_pose[:3]
