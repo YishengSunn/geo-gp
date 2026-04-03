@@ -1,6 +1,5 @@
 import torch
 
-from utils.so3 import so3_log
 from geometry.features import (
     spherical_feat_from_xyz_torch, 
     direction_feat_from_xyz_torch
@@ -85,7 +84,8 @@ def build_dataset_6d(
     traj_quat: torch.Tensor,
     k: int,
     input_type: str = 'spherical',
-    output_type: str = 'delta'
+    output_type: str = 'delta',
+    traj_force: torch.Tensor | None = None,
 ):
     """
     Build 6D dataset from trajectory with specified input and output types.
@@ -96,6 +96,7 @@ def build_dataset_6d(
         k: history length
         input_type: str, input feature type ('pos', 'delta', 'pos+delta', 'spherical', 'spherical+delta', 'dir')
         output_type: str, output type ('delta' or 'absolute')
+        traj_force: optional (T, 3) force in the same frame as traj_pos
 
     Returns:
         Xs: torch tensor of shape (N, D_in)
@@ -105,6 +106,9 @@ def build_dataset_6d(
         "[Dataset] Position and quaternion trajectories must match!"
 
     T = traj_pos.shape[0]
+    if traj_force is not None:
+        assert traj_force.ndim == 2 and traj_force.shape == (T, 3), \
+            f"Expected traj_force (T, 3) with T={T}, got {traj_force.shape}"
 
     global_origin = traj_pos[0]
     deltas = traj_pos[1:] - traj_pos[:-1]
@@ -157,10 +161,17 @@ def build_dataset_6d(
             if dq[0] < 0:
                 dq = -dq
 
-            Ys.append(torch.cat([deltas[i], dq], dim=0))
+            y = torch.cat([deltas[i], dq], dim=0)
+            if traj_force is not None:
+                df = traj_force[i+1] - traj_force[i]
+                y = torch.cat([y, df], dim=0)
+            Ys.append(y)
 
         elif output_type == 'absolute':
-            Ys.append(torch.cat([traj_pos[i+1], traj_quat[i+1]], dim=0))
+            y = torch.cat([traj_pos[i+1], traj_quat[i+1]], dim=0)
+            if traj_force is not None:
+                y = torch.cat([y, traj_force[i+1]], dim=0)
+            Ys.append(y)
 
         else:
             raise ValueError(f"Unsupported output_type: {output_type}")
