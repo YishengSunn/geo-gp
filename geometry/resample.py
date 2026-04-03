@@ -1,7 +1,6 @@
 import numpy as np
 
 from utils.quaternion import quat_slerp
-from utils.so3 import so3_log, so3_exp
 
 
 def resample_trajectory_3d_equal_dt(
@@ -25,7 +24,7 @@ def resample_trajectory_3d_equal_dt(
     """
     pts = np.asarray(points_xyz, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] != 3:
-        raise ValueError(f"Expected points_xyz shape (N, 3), got {pts.shape}!")
+        raise ValueError(f"Expected points_xyz shape (N, 3), got {pts.shape}")
 
     if pts.shape[0] < 2:
         return pts.copy()
@@ -137,6 +136,7 @@ def resample_trajectory_6d_equal_dt(
     # 3) Cumulative arc-length
     cum_len = np.concatenate([[0.0], np.cumsum(seg_len)])
 
+    # 4) Interpolation
     pos_out = []
     quat_out = []
     force_out = [] if pf is not None else None
@@ -190,16 +190,22 @@ def resample_by_arclen_fraction(P: np.ndarray, M: int, eps: float = 1e-9) -> np.
     if P.shape[0] < 2:
         return np.repeat(P[:1], M, axis=0)
 
+    # 1) Segment lengths
     seg = P[1:] - P[:-1]
     seg_len = np.linalg.norm(seg, axis=1)
+
+    # 2) Cumulative arc-length
     cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+
+    # 3) Total length
     total = float(cum[-1])
     if total < eps:
         return np.repeat(P[:1], M, axis=0)
 
-    # Target cumulative lengths (uniform in fraction)
+    # 4) Target cumulative lengths (uniform in fraction)
     s_targets = np.linspace(0.0, total, M)
 
+    # 5) Linear interpolation along arc-length
     out = np.empty((M, 3), dtype=np.float64)
     j = 0
     for i, s in enumerate(s_targets):

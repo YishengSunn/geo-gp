@@ -3,7 +3,12 @@ import numpy as np
 from geometry.resample import resample_by_arclen_fraction
 
 
-def estimate_rotation_scale_3d(ref_pts, probe_pts, eps=1e-12):
+def estimate_rotation_scale_3d(
+    ref_pts: np.ndarray,
+    probe_pts: np.ndarray,
+    *,
+    eps: float = 1e-12,
+) -> tuple[np.ndarray, float, np.ndarray, float]:
     """
     Estimate similarity transform (rotation R, isotropic scale s, translation t)
     that best aligns ref_pts -> probe_pts in least-squares sense.
@@ -40,10 +45,10 @@ def estimate_rotation_scale_3d(ref_pts, probe_pts, eps=1e-12):
     # 2) Rotation via Kabsch/Procrustes (SVD)
     # We want: Yc ≈ s * Xc @ R.T  => (Xc^T Yc) relates the frames
     H = Xc.T @ Yc  # (3,3)
-    U, Svals, Vt = np.linalg.svd(H)
+    U, _, Vt = np.linalg.svd(H)
     R = Vt.T @ U.T
 
-    # Fix reflection to ensure det(R)=+1 (proper rotation)
+    # Fix reflection to ensure det(R)=+1
     if np.linalg.det(R) < 0:
         Vt[-1, :] *= -1
         R = Vt.T @ U.T
@@ -72,7 +77,7 @@ def estimate_rotation_scale_3d_search_by_count(
     *,
     margin_pts: int = 20,
     step: int = 1,
-):
+) -> tuple[np.ndarray, float, np.ndarray, int, float]:
     """
     Estimate similarity transform (R,s,t) aligning ref_eq -> probe_eq
     by searching over possible segment lengths in ref_eq.
@@ -106,9 +111,9 @@ def estimate_rotation_scale_3d_search_by_count(
     best = None
     for j_end in range(j_lo, j_hi + 1, step):
         X = ref_eq[:j_end]
-        Y = probe_eq  # Use all probe points
+        Y = probe_eq
 
-        Xr = resample_by_arclen_fraction(X, Np)  # Resample to match probe point count
+        Xr = resample_by_arclen_fraction(X, Np)
         R, s, t, rmse = estimate_rotation_scale_3d(Xr, Y)
         if best is None or rmse < best[0]:
             best = (rmse, R, s, t, j_end)

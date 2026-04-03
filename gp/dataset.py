@@ -1,26 +1,23 @@
 import torch
 
-from geometry.features import (
-    spherical_feat_from_xyz_torch, 
-    direction_feat_from_xyz_torch
-)
+from geometry.features import spherical_feat_from_xyz_torch, direction_feat_from_xyz_torch
 from utils.quaternion import quat_mul, quat_inv
 
 
-def build_dataset_3d(traj, k, input_type='delta', output_type='delta'):
+def build_dataset_3d(
+    traj: torch.Tensor,
+    k: int,
+    input_type: str = 'delta',
+    output_type: str = 'delta',
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Build 3D dataset from trajectory with specified input and output types.
-
-    Initial version:
-    - Cartesian only
-    - No rotation / polar features
-    - Delta-based modeling
 
     Args:
         traj: torch tensor of shape (T, 3)
         k: history length
-        input_type: currently only supports 'delta' or 'pos'
-        output_type: 'delta' or 'absolute'
+        input_type: input feature type ('delta', 'pos', 'pos+delta', 'spherical', 'spherical+delta', 'dir')
+        output_type: output feature type ('delta', 'absolute')
 
     Returns:
         Xs: torch tensor of shape (N, k*3)
@@ -30,13 +27,12 @@ def build_dataset_3d(traj, k, input_type='delta', output_type='delta'):
 
     global_origin = traj[0]
 
-    # Precompute deltas
     deltas = traj[1:] - traj[:-1]
     N = deltas.shape[0]
 
     Xs, Ys = [], []
     for i in range(k, N):
-        # Input
+        # Input features
         if input_type == 'delta':
             hist = deltas[i-k:i]
             Xs.append(hist.reshape(-1))
@@ -69,7 +65,7 @@ def build_dataset_3d(traj, k, input_type='delta', output_type='delta'):
         else:
             raise ValueError(f"Unsupported input_type for 3D: {input_type}")
 
-        # Output
+        # Output features
         if output_type == 'delta':
             Ys.append(deltas[i])
         elif output_type == 'absolute':
@@ -86,7 +82,7 @@ def build_dataset_6d(
     input_type: str = 'spherical',
     output_type: str = 'delta',
     traj_force: torch.Tensor | None = None,
-):
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Build 6D dataset from trajectory with specified input and output types.
     
@@ -94,8 +90,8 @@ def build_dataset_6d(
         traj_pos: torch tensor of shape (T, 3)
         traj_quat: torch tensor of shape (T, 4) - quaternions
         k: history length
-        input_type: str, input feature type ('pos', 'delta', 'pos+delta', 'spherical', 'spherical+delta', 'dir')
-        output_type: str, output type ('delta' or 'absolute')
+        input_type: input feature type ('pos', 'delta', 'pos+delta', 'spherical', 'spherical+delta', 'dir')
+        output_type: output feature type ('delta', 'absolute')
         traj_force: optional (T, 3) force in the same frame as traj_pos
 
     Returns:
@@ -178,9 +174,14 @@ def build_dataset_6d(
 
     return torch.stack(Xs), torch.stack(Ys)
 
-def time_split(X, Y, train_ratio):
+def time_split(
+    X: torch.Tensor,
+    Y: torch.Tensor,
+    *,
+    train_ratio: float,
+) -> tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor], int]:
     """
-    Split dataset into training and testing sets based on time.
+    Split dataset into training and test sets based on time.
 
     Args:
         X: input data, numpy array of shape (N, D_in)

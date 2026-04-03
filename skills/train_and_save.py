@@ -1,5 +1,6 @@
 from skills.skill_loader import load_skills_from_folder
 
+
 SAVE_DIR = "data/02-26/models"
 DATA_DIR = "data/02-26/refs"
 

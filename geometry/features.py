@@ -35,8 +35,6 @@ def direction_feat_from_xyz_torch(xyz, origin, eps: float = 1e-8):
     """
     Return stable 3D "direction" features [r, ux, uy, uz] for each point.
 
-    This avoids spherical (azimuth/elevation) singularities near the z-axis.
-
     Args:
         xyz: torch tensor of shape (..., 3)
         origin: torch tensor of shape (3,)

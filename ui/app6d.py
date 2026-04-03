@@ -6,7 +6,6 @@ from config.runtime import (
     SAMPLE_HZ, DEFAULT_SPEED, TRAIN_RATIO, K_HIST, METHOD_ID,
     ROLLOUT_HORIZON, MSE_THRESH, GOAL_STOP_EPS, MAX_START_JUMP, DROP_K, MAX_RETRIES
 )
-from geometry.frame6d import estimate_rotation_scale_3d_search_by_count
 from geometry.demos import make_probe_force_raw, make_ref_force_raw
 from geometry.metrics import geom_mse
 from geometry.resample import resample_trajectory_3d_equal_dt, resample_trajectory_6d_equal_dt
@@ -23,44 +22,43 @@ from utils.quaternion import quat_to_rotmat
 
 
 class DrawApp6D:
-    def __init__(self, *, probe_plane_x=2.0):
+    def __init__(self, *, probe_plane_x: float = 2.0):
         """
         A simple UI for drawing 3D trajectories and predicting with GP.
 
         Args:
             probe_plane_x: float, x-coordinate of the probe drawing plane
-            dt: float, time step for resampling
         """
         # Config
         self.probe_plane_x = float(probe_plane_x)  # X-coordinate of the probe drawing plane
 
         # Data buffers
-        self.ref_raw = []     # list of xyz
-        self.probe_raw = []   # list of xyz
+        self.ref_raw = []           # list of (x,y,z) raw reference trajectory
+        self.probe_raw = []         # list of (x,y,z) raw probe trajectory
         self.ref_quat_raw = None
         self.probe_quat_raw = None
         self.ref_force_raw = make_ref_force_raw(400)
         self.probe_force_raw = make_probe_force_raw(100)
 
-        self.ref_eq = None    # np.ndarray (N,3) resampled
-        self.probe_eq = None  # np.ndarray (M,3) resampled
-        self.ref_quat_eq = None
-        self.probe_quat_eq = None
-        self.ref_force_eq = None
-        self.probe_force_eq = None
+        self.ref_eq = None          # np.ndarray (N,3) resampled reference trajectory
+        self.probe_eq = None        # np.ndarray (M,3) resampled probe trajectory
+        self.ref_quat_eq = None     # np.ndarray (N,4) resampled reference quaternions
+        self.probe_quat_eq = None   # np.ndarray (M,4) resampled probe quaternions
+        self.ref_force_eq = None    # np.ndarray (N,3) resampled reference forces
+        self.probe_force_eq = None  # np.ndarray (M,3) resampled probe forces
 
-        # Model / alignment / prediction
+        # Model / Alignment / Prediction
         self.model_info = None
         self.R = None
         self.s = None
         self.t = None
 
-        self.gt = None               # np.ndarray (H,3)
-        self.preds = None            # np.ndarray (H,3)
-        self.preds_quat = None       # np.ndarray (H,4)
-        self.preds_force = None      # np.ndarray (H,3)
-        self.probe_goal = None       # np.ndarray (3,)
-        self.prediction_id = 0       # Incremented on each new prediction to cancel old ones
+        self.gt = None           # np.ndarray (H,3), ground truth trajectory
+        self.preds = None        # np.ndarray (H,3), predicted trajectory
+        self.preds_quat = None   # np.ndarray (H,4), predicted quaternions
+        self.preds_force = None  # np.ndarray (H,3), predicted forces
+        self.probe_goal = None   # np.ndarray (3,), goal position
+        self.prediction_id = 0   # int, number incremented on each new prediction to cancel old ones
 
         # Smoothing
         self.smooth_enabled = True
@@ -105,6 +103,7 @@ class DrawApp6D:
 
         # Init lines (2D)
         (self.line_ref_xy,) = self.ax_xy.plot([], [], lw=2.5, c='r', label="ref")
+
         # Keep a handle to legend text for color sync
         self.ref_legend = None
         leg = self.ax_xy.legend()
@@ -133,11 +132,25 @@ class DrawApp6D:
         self.fig.canvas.mpl_connect("button_release_event", lambda event: on_release(self, event))
         self.fig.canvas.mpl_connect("key_press_event", lambda event: on_key(self, event))
     
-    def train_reference(self, *, k=K_HIST, input_type="spherical", output_type="delta"):
+    def train_reference(
+        self,
+        *,
+        k: int = K_HIST,
+        input_type: str = "spherical",
+        output_type: str = "delta",
+    ):
+        """
+        Train a GP model for the reference trajectory.
+
+        Args:
+            k: int, number of past time steps to use as input
+            input_type: str, type of input representation
+            output_type: str, type of output representation
+        """
         self.ref_eq = resample_trajectory_3d_equal_dt(self.ref_raw, sample_hz=SAMPLE_HZ, speed=DEFAULT_SPEED)
 
         if len(self.ref_eq) < k + 2:
-            print(f"[Train] Need at least {k+2} resampled points, got {len(self.ref_eq)}!")
+            print(f"[Train] Need at least {k+2} resampled points, got {len(self.ref_eq)}")
             print()
             return
         
@@ -167,7 +180,21 @@ class DrawApp6D:
         print(f"[Train] Done. ref_eq={self.ref_eq.shape}, X={X.shape}, Y={Y.shape}")
         print()
 
-    def train_reference_6d(self, *, k=K_HIST, input_type="spherical", output_type="delta"):
+    def train_reference_6d(
+        self,
+        *,
+        k: int = K_HIST,
+        input_type: str = "spherical",
+        output_type: str = "delta",
+    ):
+        """
+        Train a GP model for the reference trajectory with 6D input and output.
+
+        Args:
+            k: int, number of past time steps to use as input
+            input_type: str, type of input representation
+            output_type: str, type of output representation
+        """
         if self.ref_force_raw is not None:
             self.ref_eq, self.ref_quat_eq, self.ref_force_eq = resample_trajectory_6d_equal_dt(
                 self.ref_raw,
@@ -186,7 +213,7 @@ class DrawApp6D:
             self.ref_force_eq = None
 
         if len(self.ref_eq) < k + 2:
-            print(f"[Train] Need at least {k+2} resampled points, got {len(self.ref_eq)}!")
+            print(f"[Train] Need at least {k+2} resampled points, got {len(self.ref_eq)}")
             print()
             return
         
@@ -260,10 +287,12 @@ class DrawApp6D:
         # 1) Resample probe
         self.probe_eq = resample_trajectory_3d_equal_dt(self.probe_raw, sample_hz=SAMPLE_HZ, speed=DEFAULT_SPEED)
         print(f"[Predict] Resampled probe_eq: {self.probe_eq.shape}")
+
         if len(self.probe_eq) < (k + 2):
-            print(f"[Predict] Not enough probe points. Need >= {k+2}, got {len(self.probe_eq)}!")
+            print(f"[Predict] Not enough probe points. Need >= {k+2}, got {len(self.probe_eq)}")
             print()
             return
+
         if self.smooth_enabled:
             self.probe_eq = moving_average_centered_pos(self.probe_eq, self.smooth_win)
 
@@ -318,7 +347,7 @@ class DrawApp6D:
 
                 next_ref = preds_ref[-1].numpy()
 
-                # Ref -> Probe/world
+                # Ref -> Probe
                 next_world = self.s * (next_ref @ self.R.T) + self.t
                 preds_world.append(next_world)
 
@@ -438,7 +467,7 @@ class DrawApp6D:
             self.probe_force_eq = None
 
         if len(self.probe_eq) < (k + 2):
-            print(f"[Predict] Not enough probe points. Need >= {k+2}, got {len(self.probe_eq)}!")
+            print(f"[Predict] Not enough probe points. Need >= {k+2}, got {len(self.probe_eq)}")
             print()
             return
 
@@ -448,7 +477,7 @@ class DrawApp6D:
             if self.probe_force_eq is not None:
                 self.probe_force_eq = moving_average_centered_6d(self.probe_force_eq, self.smooth_win)
 
-        # Update probe lines
+        # Update probe lines to show resampled + smoothed
         for q in self.orient_quivers_probe:
             q.remove()
         self.orient_quivers_probe.clear()
@@ -519,6 +548,7 @@ class DrawApp6D:
 
                 next_ref_pos = preds_ref_pos[-1].numpy()
 
+                # Ref -> Probe
                 next_world_pos = self.s * (next_ref_pos @ self.R.T) + self.t
                 next_world_quat = preds_quat[-1].numpy()
 
@@ -528,7 +558,7 @@ class DrawApp6D:
                     next_world_force = preds_ref_force[-1].numpy()
                     preds_world_force.append(next_world_force)
 
-                # Update history in ref frame
+                # Update history
                 cur_pos = np.vstack([cur_pos, next_ref_pos])
                 cur_quat = np.vstack([cur_quat, next_world_quat[None, :]])
                 if cur_force is not None and preds_ref_force is not None:
@@ -542,7 +572,7 @@ class DrawApp6D:
                         print(f"[Predict] Reached goal at step {step}, d={d:.4f}")
                         break
 
-            # Geometric drift check (position only)
+            # Geometric drift check
             mse_full = geom_mse(cur_pos, self.ref_eq, min(len(cur_pos), len(self.ref_eq)))
             print(f"[GeomCheck] full mse = {mse_full:.4f}")
 
@@ -555,7 +585,7 @@ class DrawApp6D:
                 preds_world_quat = np.asarray(preds_world_quat)
                 preds_world_force = np.asarray(preds_world_force) if len(preds_world_force) else None
 
-                # Robust start selection near probe end
+                # Robust start selection: enforce temporal consistency
                 probe_end = self.probe_eq[-1]
 
                 dists = np.linalg.norm(preds_world_pos - probe_end, axis=1)
@@ -565,10 +595,11 @@ class DrawApp6D:
                     print("[Recover] No prediction point close to probe end, retry...")
                     failed = True
                 else:
+                    # Choose the earliest such index to avoid skipping trajectory segments
                     i_start = int(candidate_idxs[0])
                     print(f"[Recover] Using earliest matching index {i_start}")
 
-                    # Continuity check
+                    # Additional safety: ensure local continuity (no big velocity jump)
                     if i_start > 0:
                         step_jump = np.linalg.norm(preds_world_pos[i_start] - preds_world_pos[i_start - 1])
                         mean_step = np.mean(np.linalg.norm(np.diff(preds_world_pos, axis=0), axis=1))
@@ -582,7 +613,7 @@ class DrawApp6D:
                     self.preds_force = preds_world_force[i_start:] if preds_world_force is not None else None
                     break
 
-            # Drop tail and retry
+            # Drop tail of probe history and retry
             if probe_in_ref.shape[0] <= (k + DROP_K):
                 break
 
@@ -626,6 +657,7 @@ class DrawApp6D:
             return
 
         P = np.asarray(self.ref_raw, dtype=np.float64)
+
         # XY view
         self.line_ref_xy.set_data(P[:, 0], P[:, 1])
 
@@ -660,6 +692,7 @@ class DrawApp6D:
             return
 
         P = np.asarray(self.probe_raw, dtype=np.float64)
+
         # YZ view (x axis = y, y axis = z)
         self.line_probe_yz.set_data(P[:, 1], P[:, 2])
 
@@ -712,13 +745,19 @@ class DrawApp6D:
         self.autoscale_3d()
         self.fig.canvas.draw_idle()
 
-    def draw_orientations(self, positions, quaternions, quiver_store, scale=0.02):
+    def draw_orientations(
+        self,
+        positions: np.ndarray,
+        quaternions: np.ndarray,
+        quiver_store: list,
+        scale: float = 0.02,
+    ):
         """
         Draw orientation arrows in 3D using quaternions.
 
         Args:
-            positions: list or np.ndarray of shape (N,3), positions of the quivers
-            quaternions: list or np.ndarray of shape (N,4), quaternions representing orientations
+            positions: np.ndarray of shape (N,3), positions of the quivers
+            quaternions: np.ndarray of shape (N,4), quaternions representing orientations
             quiver_store: list, to store the created quiver objects for later removal
             scale: float, scaling factor for the quiver lengths
         """
@@ -765,7 +804,7 @@ class DrawApp6D:
             )
             quiver_store.append(qz)
 
-    def autoscale_3d(self, margin=0.05):
+    def autoscale_3d(self, margin: float = 0.05):
         """
         Keep 3D view in true equal scale based on all currently available points.
 

@@ -12,12 +12,13 @@ def make_ref_force_raw(n: int) -> np.ndarray:
         n: int, number of points
 
     Returns:
-        f: (N,3) force along global -z (down).
+        f: (N,3) force along global -z (down)
     """
     n = int(n)
     f = np.zeros((n, 3), dtype=np.float64)
     if n > 0:
         f[:, 2] = np.linspace(0.0, 2.0, n, dtype=np.float64)
+
     return f
 
 def make_probe_force_raw(n: int) -> np.ndarray:
@@ -28,12 +29,13 @@ def make_probe_force_raw(n: int) -> np.ndarray:
         n: int, number of points
 
     Returns:
-        f: (N,3) force along +x, magnitude linear from 0 to 1 along the sequence.
+        f: (N,3) force along +x, magnitude linear from 0 to 1 along the sequence
     """
     n = int(n)
     f = np.zeros((n, 3), dtype=np.float64)
     if n > 0:
         f[:, 0] = np.linspace(1.0, 2.0, n, dtype=np.float64)
+
     return f
 
 def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
@@ -55,7 +57,7 @@ def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
     # Reference (vertical helix): (x,y,z) = (cos, sin, speed*t)
     ref = np.stack([radius * np.cos(t), radius * np.sin(t), speed * t], axis=1)
 
-    # Probe (horizontal-ish helix): progress along x, circle in (y,z), keep near x=probe_plane_x
+    # Probe (horizontal helix): progress along x, circle in (y,z), keep near x=probe_plane_x
     probe = np.stack(
         [np.full_like(t, app6d.probe_plane_x) + speed * t,
         radius * np.cos(t),
@@ -65,13 +67,6 @@ def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
 
     app6d.ref_raw = ref.tolist()
     app6d.probe_raw = probe[:50].tolist()
-
-    # Reset derived buffers / outputs
-    app6d.ref_eq = app6d.probe_eq = None
-    app6d.model_info = None
-    app6d.R = app6d.s = app6d.t = None
-    app6d.preds = app6d.gt = None
-    app6d.probe_goal = None
 
     app6d.update_ref_lines()
     app6d.update_probe_lines()
@@ -83,9 +78,9 @@ def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
 def load_demo_circles_with_orientation(app6d, *, T=400, r_ref=0.5, r_probe=1.0):
     """
     Load a demo pair of circles with orientation into ref_raw/probe_raw and ref_quat_raw/probe_quat_raw.
+
     - Reference: circle in the xy-plane, centered at origin, with radius r_ref.
     - Probe: circle in the yz-plane, centered at (probe_plane_x, 0, 0), with radius r_probe.
-    The orientations (quaternions) are set so that the "front" of each point faces towards the center of its circle.
 
     Args:
         T: int, number of points per circle
