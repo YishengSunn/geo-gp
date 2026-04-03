@@ -4,6 +4,38 @@ import numpy as np
 from utils.quaternion import quat_between_vectors, rotmat_to_quat
 
 
+def make_ref_force_raw(n: int) -> np.ndarray:
+    """
+    Build a (N,3) force along global -z (down).
+
+    Args:
+        n: int, number of points
+
+    Returns:
+        f: (N,3) force along global -z (down).
+    """
+    n = int(n)
+    f = np.zeros((n, 3), dtype=np.float64)
+    if n > 0:
+        f[:, 2] = np.linspace(0.0, 2.0, n, dtype=np.float64)
+    return f
+
+def make_probe_force_raw(n: int) -> np.ndarray:
+    """
+    Build a (N,3) force along +x, magnitude linear from 0 to 1 along the sequence.
+
+    Args:
+        n: int, number of points
+
+    Returns:
+        f: (N,3) force along +x, magnitude linear from 0 to 1 along the sequence.
+    """
+    n = int(n)
+    f = np.zeros((n, 3), dtype=np.float64)
+    if n > 0:
+        f[:, 0] = np.linspace(1.0, 2.0, n, dtype=np.float64)
+    return f
+
 def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
     """
     Load a demo pair of 3D spirals into ref_raw and probe_raw.
