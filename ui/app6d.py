@@ -7,6 +7,7 @@ from config.runtime import (
     ROLLOUT_HORIZON, MSE_THRESH, GOAL_STOP_EPS, MAX_START_JUMP, DROP_K, MAX_RETRIES
 )
 from geometry.frame6d import estimate_rotation_scale_3d_search_by_count
+from geometry.demos import make_probe_force_raw, make_ref_force_raw
 from geometry.metrics import geom_mse
 from geometry.resample import resample_trajectory_3d_equal_dt, resample_trajectory_6d_equal_dt
 from gp.dataset import build_dataset_3d, build_dataset_6d, time_split
@@ -38,12 +39,15 @@ class DrawApp6D:
         self.probe_raw = []   # list of xyz
         self.ref_quat_raw = None
         self.probe_quat_raw = None
+        self.ref_force_raw = make_ref_force_raw(400)
+        self.probe_force_raw = make_probe_force_raw(100)
 
         self.ref_eq = None    # np.ndarray (N,3) resampled
         self.probe_eq = None  # np.ndarray (M,3) resampled
         self.ref_quat_eq = None
         self.probe_quat_eq = None
         self.ref_force_eq = None
+        self.probe_force_eq = None
 
         # Model / alignment / prediction
         self.model_info = None
@@ -139,6 +143,7 @@ class DrawApp6D:
         
         if self.smooth_enabled:
             self.ref_eq = moving_average_centered_pos(self.ref_eq, self.smooth_win)
+
         ref_torch = torch.tensor(self.ref_eq, dtype=torch.float32)
 
         X, Y = build_dataset_3d(ref_torch, k, input_type=input_type, output_type=output_type)
@@ -163,13 +168,22 @@ class DrawApp6D:
         print()
 
     def train_reference_6d(self, *, k=K_HIST, input_type="spherical", output_type="delta"):
-        self.ref_eq, self.ref_quat_eq = resample_trajectory_6d_equal_dt(
-            self.ref_raw,
-            self.ref_quat_raw,
-            sample_hz=SAMPLE_HZ,
-            speed=DEFAULT_SPEED,
-        )
-        self.ref_force_eq = None
+        if self.ref_force_raw is not None:
+            self.ref_eq, self.ref_quat_eq, self.ref_force_eq = resample_trajectory_6d_equal_dt(
+                self.ref_raw,
+                self.ref_quat_raw,
+                sample_hz=SAMPLE_HZ,
+                speed=DEFAULT_SPEED,
+                points_force=self.ref_force_raw,
+            )
+        else:
+            self.ref_eq, self.ref_quat_eq = resample_trajectory_6d_equal_dt(
+                self.ref_raw,
+                self.ref_quat_raw,
+                sample_hz=SAMPLE_HZ,
+                speed=DEFAULT_SPEED,
+            )
+            self.ref_force_eq = None
 
         if len(self.ref_eq) < k + 2:
             print(f"[Train] Need at least {k+2} resampled points, got {len(self.ref_eq)}!")
@@ -179,6 +193,9 @@ class DrawApp6D:
         if self.smooth_enabled:
             self.ref_eq = moving_average_centered_6d(self.ref_eq, self.smooth_win)
             self.ref_quat_eq = moving_average_centered_6d(self.ref_quat_eq, self.smooth_win)
+            if self.ref_force_eq is not None:
+                self.ref_force_eq = moving_average_centered_6d(self.ref_force_eq, self.smooth_win)
+
         ref_torch = torch.tensor(self.ref_eq, dtype=torch.float32)
         ref_quat_torch = torch.tensor(self.ref_quat_eq, dtype=torch.float32)
         ref_force_torch = None if self.ref_force_eq is None else torch.tensor(self.ref_force_eq, dtype=torch.float32)
@@ -403,12 +420,22 @@ class DrawApp6D:
         #     return
 
         # 1) Resample probe (position + orientation)
-        self.probe_eq, self.probe_quat_eq = resample_trajectory_6d_equal_dt(
-            self.probe_raw,
-            self.probe_quat_raw,
-            sample_hz=SAMPLE_HZ,
-            speed=DEFAULT_SPEED,
-        )
+        if self.probe_force_raw is not None:
+            self.probe_eq, self.probe_quat_eq, self.probe_force_eq = resample_trajectory_6d_equal_dt(
+                self.probe_raw,
+                self.probe_quat_raw,
+                sample_hz=SAMPLE_HZ,
+                speed=DEFAULT_SPEED,
+                points_force=self.probe_force_raw,
+            )
+        else:
+            self.probe_eq, self.probe_quat_eq = resample_trajectory_6d_equal_dt(
+                self.probe_raw,
+                self.probe_quat_raw,
+                sample_hz=SAMPLE_HZ,
+                speed=DEFAULT_SPEED,
+            )
+            self.probe_force_eq = None
 
         if len(self.probe_eq) < (k + 2):
             print(f"[Predict] Not enough probe points. Need >= {k+2}, got {len(self.probe_eq)}!")
@@ -418,6 +445,8 @@ class DrawApp6D:
         if self.smooth_enabled:
             self.probe_eq = moving_average_centered_6d(self.probe_eq, self.smooth_win)
             self.probe_quat_eq = moving_average_centered_6d(self.probe_quat_eq, self.smooth_win)
+            if self.probe_force_eq is not None:
+                self.probe_force_eq = moving_average_centered_6d(self.probe_force_eq, self.smooth_win)
 
         # Update probe lines
         for q in self.orient_quivers_probe:
@@ -433,6 +462,10 @@ class DrawApp6D:
         # 2) Alignment
         skill, (R, s, t, j_end) = self.skill_library.match(self.probe_eq, margin_pts=1000)
 
+        self.ref_eq = skill.ref_eq
+        self.ref_quat_eq = skill.ref_quat_eq
+        self.model_info = skill.model
+
         # R, s, t, j_end = estimate_rotation_scale_3d_search_by_count(
         #     self.ref_eq,
         #     self.probe_eq,
@@ -441,10 +474,6 @@ class DrawApp6D:
         # )[:4]
 
         self.R, self.s, self.t = R, s, t
-
-        self.ref_eq = skill.ref_eq
-        self.ref_quat_eq = skill.ref_quat_eq
-        self.model_info = skill.model
 
         # 3) Transform probe into ref frame
         probe_in_ref = ((self.probe_eq - t) / s) @ R
@@ -458,7 +487,7 @@ class DrawApp6D:
         for attempt in range(MAX_RETRIES):
             cur_pos = probe_in_ref.copy()
             cur_quat = self.probe_quat_eq.copy()[:cur_pos.shape[0]]
-            cur_force = self.ref_force_eq.copy()[:cur_pos.shape[0]]
+            cur_force = None if self.probe_force_eq is None else self.probe_force_eq.copy()[:cur_pos.shape[0]]
 
             preds_world_pos = []
             preds_world_quat = []
@@ -473,7 +502,7 @@ class DrawApp6D:
 
                 tp = torch.tensor(cur_pos, dtype=torch.float32)
                 tq = torch.tensor(cur_quat, dtype=torch.float32)
-                tf = torch.tensor(cur_force, dtype=torch.float32)
+                tf = None if cur_force is None else torch.tensor(cur_force, dtype=torch.float32)
 
                 preds_ref_pos, preds_quat, preds_ref_force, _, _, _, vars_ref = rollout_reference_6d(
                     self.model_info,
@@ -496,13 +525,14 @@ class DrawApp6D:
                 preds_world_pos.append(next_world_pos)
                 preds_world_quat.append(next_world_quat)
                 if preds_ref_force is not None:
-                    next_ref_force = preds_ref_force[-1].numpy()
-                    preds_world_force.append(next_ref_force @ self.R.T)
+                    next_world_force = preds_ref_force[-1].numpy()
+                    preds_world_force.append(next_world_force)
 
                 # Update history in ref frame
                 cur_pos = np.vstack([cur_pos, next_ref_pos])
                 cur_quat = np.vstack([cur_quat, next_world_quat[None, :]])
-                cur_force = np.vstack([cur_force, next_ref_force[None, :]])
+                if cur_force is not None and preds_ref_force is not None:
+                    cur_force = np.vstack([cur_force, next_world_force[None, :]])
                 
                 # Truncation logic
                 if self.probe_goal is not None:
@@ -783,7 +813,8 @@ class DrawApp6D:
         self.ref_quat_raw = self.probe_quat_raw = None
         self.ref_eq = self.probe_eq = None
         self.ref_quat_eq = self.probe_quat_eq = None
-        self.ref_force_eq = None
+        self.ref_force_raw = self.probe_force_raw = None
+        self.ref_force_eq = self.probe_force_eq = None
         self.preds = self.gt = None
         self.preds_force = None
         self.model_info = None
