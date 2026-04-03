@@ -5,7 +5,6 @@ from config.runtime import (
     NEAREST_K, MAX_EXPERTS, MAX_DATA_PER_EXPERT, MIN_POINTS_OFFLINE, WINDOW_SIZE,
     METHOD_ID, METHOD_HPARAM
 )
-from utils.so3 import so3_exp
 from geometry.features import (
     spherical_feat_from_xyz_torch, 
     direction_feat_from_xyz_torch
@@ -207,15 +206,15 @@ def rollout_reference_6d(
         input_type: 'delta', 'pos', 'pos+delta', 'spherical', or 'spherical+delta'
         output_type: 'delta' or 'absolute'
         R_ref_probe: (3, 3) rotation matrix, reference to probe frame rotation
-        traj_force: optional (T, 3) force aligned with traj_pos; if None, treated as zeros.
+        traj_force: optional (T, 3) force aligned with traj_pos
 
     Returns:
         preds_pos: torch tensor of shape (h, 3), predicted positions
         preds_quat: torch tensor of shape (h, 4), predicted orientations (quaternions)
-        preds_force: torch tensor of shape (h, 3) if model outputs force, else None
+        preds_force: torch tensor of shape (h, 3) if model has force outputs and traj_force was given, else None
         gt_pos: torch tensor of shape (h, 3), ground truth positions
         gt_quat: torch tensor of shape (h, 4), ground truth orientations (quaternions)
-        gt_force: torch tensor of shape (h, 3) if model outputs force, else None
+        gt_force: same condition as preds_force
         vars_seq: numpy array of shape (h,), variance at each step
     """
     assert traj_pos.ndim == 2 and traj_pos.shape[1] == 3, f"Expected traj_pos shape (T,3), got {traj_pos.shape}"
@@ -223,15 +222,15 @@ def rollout_reference_6d(
     assert start_t >= k, f"Expected start_t >= k, got start_t={start_t}, k={k}"
 
     d_out = int(model_info['scaler'].Y_mean.shape[0])
-    predict_force = d_out >= 10
+    emit_force = traj_force is not None and (d_out >= 10)
 
     R_ref_probe = torch.tensor(R_ref_probe, dtype=torch.float32) if R_ref_probe is not None else None
 
     T = traj_pos.shape[0]
-    if traj_force is None:
+    if not emit_force:
         traj_force = torch.zeros((T, 3), dtype=traj_pos.dtype, device=traj_pos.device)
     else:
-        assert traj_force.shape == (T, 3), f"Expected traj_force (T,3), got {traj_force.shape}"
+        assert traj_force.shape == (T, 3), f"Expected traj_force ({T},3), got {traj_force.shape}"
         traj_force = traj_force.to(device=traj_pos.device, dtype=traj_pos.dtype)
 
     global_origin = traj_pos[0]
@@ -245,7 +244,7 @@ def rollout_reference_6d(
 
     preds_pos = []
     preds_quat = []
-    preds_force = [] if predict_force else None
+    preds_force = [] if emit_force else None
     vars_seq = []
 
     for _ in range(h):
@@ -308,7 +307,7 @@ def rollout_reference_6d(
             next_q = quat_mul(cur_q, dq)
             next_q = quat_normalize(next_q)
 
-            if predict_force:
+            if emit_force:
                 next_force = cur_force + d_force_pred @ R_ref_probe.T
 
         elif output_type == 'absolute':
@@ -322,7 +321,7 @@ def rollout_reference_6d(
 
             delta_world = next_pos - cur_pos
 
-            if predict_force:
+            if emit_force:
                 next_force = d_force_pred
 
         else:
@@ -331,7 +330,7 @@ def rollout_reference_6d(
         # Save predictions
         preds_pos.append(next_pos)
         preds_quat.append(next_q)
-        if predict_force:
+        if emit_force:
             preds_force.append(next_force)
 
         # Update history for next step
@@ -340,19 +339,19 @@ def rollout_reference_6d(
 
         cur_pos = next_pos
         cur_q = next_q
-        if predict_force and next_force is not None:
+        if emit_force and next_force is not None:
             cur_force = next_force
 
     preds_pos = torch.stack(preds_pos, dim=0)
     preds_quat = torch.stack(preds_quat, dim=0)
-    if predict_force:
+    if emit_force:
         preds_force_t = torch.stack(preds_force, dim=0)
     else:
         preds_force_t = None
 
     gt_pos = traj_pos[start_t+1:start_t+1+h]
     gt_quat = traj_quat[start_t+1:start_t+1+h]
-    if predict_force:
+    if emit_force:
         gt_force_t = traj_force[start_t+1:start_t+1+h]
     else:
         gt_force_t = None
