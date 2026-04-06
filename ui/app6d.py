@@ -7,6 +7,7 @@ from config.runtime import (
     ROLLOUT_HORIZON, MSE_THRESH, GOAL_STOP_EPS, MAX_START_JUMP, DROP_K, MAX_RETRIES
 )
 from geometry.demos import make_probe_force_raw, make_ref_force_raw
+from geometry.frame6d import estimate_rotation_scale_3d_search_by_count
 from geometry.metrics import geom_mse
 from geometry.resample import resample_trajectory_3d_equal_dt, resample_trajectory_6d_equal_dt
 from gp.dataset import build_dataset_3d, build_dataset_6d, time_split
@@ -37,8 +38,8 @@ class DrawApp6D:
         self.probe_raw = []         # list of (x,y,z) raw probe trajectory
         self.ref_quat_raw = None
         self.probe_quat_raw = None
-        self.ref_force_raw = make_ref_force_raw(400)
-        self.probe_force_raw = make_probe_force_raw(100)
+        self.ref_force_raw = None
+        self.probe_force_raw = None
 
         self.ref_eq = None          # np.ndarray (N,3) resampled reference trajectory
         self.probe_eq = None        # np.ndarray (M,3) resampled probe trajectory

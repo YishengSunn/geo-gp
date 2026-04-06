@@ -177,7 +177,6 @@ def build_dataset_6d(
 def time_split(
     X: torch.Tensor,
     Y: torch.Tensor,
-    *,
     train_ratio: float,
 ) -> tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor], int]:
     """
