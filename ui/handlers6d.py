@@ -1,4 +1,5 @@
 import numpy as np
+from matplotlib.backend_bases import MouseEvent, KeyEvent
 
 from geometry.demos import (load_demo_spirals, load_demo_circles_with_orientation, 
                             load_ref_from_csv, load_probe_from_csv
@@ -6,7 +7,7 @@ from geometry.demos import (load_demo_spirals, load_demo_circles_with_orientatio
 from utils.misc import process_csv, save_reference_raw_to_csv, save_predictions_to_csv
 
 
-def on_press(app6d, event):
+def on_press(app6d, event: MouseEvent):
     """
     Handle mouse press events for drawing.
     """
@@ -34,9 +35,9 @@ def on_press(app6d, event):
         app6d.probe_raw.append(yz_to_xyz(app6d, event))
         app6d.update_probe_lines()
         app6d.update_pred_lines()
-        print("[UI] Start drawing probe (YZ).")
+        print("[UI] Start drawing probe (YZ)...")
 
-def on_move(app6d, event):
+def on_move(app6d, event: MouseEvent):
     """
     Handle mouse move events for drawing.
     """
@@ -51,7 +52,7 @@ def on_move(app6d, event):
         app6d.probe_raw.append(yz_to_xyz(app6d, event))
         app6d.update_probe_lines()
 
-def on_release(app6d, event):
+def on_release(app6d, event: MouseEvent):
     """
     Handle mouse release events to finish drawing.
     """
@@ -62,7 +63,7 @@ def on_release(app6d, event):
         print()
         return
 
-    # Finish probe -> resample & predict automatically
+    # Finish probe -> resample and predict automatically
     if event.button == 3 and app6d.drawing_probe:
         app6d.drawing_probe = False
         print(f"[UI] Probe finished. pts={len(app6d.probe_raw)}")
@@ -72,7 +73,10 @@ def on_release(app6d, event):
         else:
             app6d.process_probe_and_predict()
 
-def on_key(app6d, event):
+def on_key(app6d, event: KeyEvent):
+    """
+    Handle key press events.
+    """
     key = event.key
 
     if key == "c":
@@ -82,6 +86,7 @@ def on_key(app6d, event):
         app6d.prediction_id += 1
         app6d.ref_raw = app6d.ref_eq = []
         app6d.ref_quat_raw = app6d.ref_quat_eq = None
+        app6d.ref_force_raw = app6d.ref_force_eq = None
         app6d.ref_legend.set_color("tab:red")
         app6d.line_ref_xy.set_color("tab:red")
         app6d.line_ref_3d.set_color("tab:red")
@@ -93,6 +98,7 @@ def on_key(app6d, event):
         app6d.prediction_id += 1
         app6d.probe_raw = app6d.probe_eq = []
         app6d.probe_quat_raw = app6d.probe_quat_eq = None
+        app6d.probe_force_raw = app6d.probe_force_eq = None
         app6d.preds = app6d.gt = None
         app6d.update_probe_lines()
         app6d.update_pred_lines()
@@ -157,13 +163,13 @@ def on_key(app6d, event):
                     "data/02-16-1/refs_2/ref_2026-02-16_15-33-07.csv",
                     freq=20, downsample=1)
 
-def xy_to_xyz(app6d, event):
+def xy_to_xyz(app6d, event: MouseEvent):
     """
     Convert XY plane event to XYZ coordinate (z=0).
     """
     return np.array([float(event.xdata), float(event.ydata), 0.0], dtype=np.float64)
 
-def yz_to_xyz(app6d, event):
+def yz_to_xyz(app6d, event: MouseEvent):
     """
     Convert YZ plane event to XYZ coordinate (x=probe_plane_x).
     """

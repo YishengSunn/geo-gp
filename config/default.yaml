@@ -1,27 +1,27 @@
-# =========================
+# ============================================================
 # Global experiment control
-# =========================
+# ============================================================
 experiment:
   seed: 0
 
-# =========================
+# ============================================================
 # Sampling
-# =========================
+# ============================================================
 sampling:
   k_hist: 10          # Seed history length
   sample_hz: 200      # Sample frequency for equal-dt resampling
   default_speed: 0.2  # Convert polyline length to time for equal-time sampling
   smooth_win: 9       # Smoothing window size for trajectory smoothing
 
-# =========================
+# ============================================================
 # Dataset
-# =========================
+# ============================================================
 dataset:
   train_ratio: 1.0    # Training ratio (1.0 means full training)
 
-# =========================
+# ============================================================
 # GP hyperparameters
-# =========================
+# ============================================================
 gp:
   nearest_k: 2
   max_experts: 40
@@ -29,19 +29,16 @@ gp:
   min_points_offline: 1
   window_size: null   # Sliding window size (None means not used)
 
-# =========================
+# ============================================================
 # Method
-# =========================
+# ============================================================
 method:
   id: 1
-  hparams:
-    1:
-      adam_lr: 0.001
-      adam_steps: 1
+  hparams: {1: {adam_lr: 0.001, adam_steps: 1}}
 
-# =========================
+# ============================================================
 # Prediction
-# =========================
+# ============================================================
 prediction:
   rollout_horizon: 1000  # Max steps to rollout
   mse_thresh: 0.001      # Threshold for geometric drift detection during rollout
