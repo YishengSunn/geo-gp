@@ -73,7 +73,7 @@ class DrawApp6D:
         # Skill library
         mode = "6d" if self.use_6d else "3d"
         self.skill_library = SkillLibrary()
-        skills = load_skills_from_models("data/02-26/models/3d", mode=mode)
+        skills = load_skills_from_models("data/04-21/models/3d", mode=mode)
         for s in skills:
             self.skill_library.add_skill(s)
         print(self.skill_library)
