@@ -124,10 +124,10 @@ def on_key(app6d, event: KeyEvent):
         load_demo_circles_with_orientation(app6d)
 
     elif key == "R":
-        load_ref_from_csv(app6d, "data/02-16-1/refs_1/ee_trajectory_2026-02-16_15-01-33.csv")
+        load_ref_from_csv(app6d, "data/04-21/refs/processed/point_to_point.csv")
 
     elif key == "P":
-        load_probe_from_csv(app6d, "data/02-16-1/probes_1/ee_trajectory_2026-02-16_15-03-57.csv")
+        load_probe_from_csv(app6d, "data/04-21/probes/point_to_point.csv")
 
     elif key == "t":
         if app6d.use_6d:
@@ -143,7 +143,7 @@ def on_key(app6d, event: KeyEvent):
 
     elif key == "s":
         if app6d.preds is not None and app6d.preds_quat is not None:
-            file_path = "data/02-16-1/preds_2/prediction_2026-02-16_15-34-03.csv"
+            file_path = "data/04-21/preds/prediction_point_to_point.csv"
 
             save_predictions_to_csv(file_path, app6d.preds, app6d.preds_quat, dt=0.05)
             print(f"[UI] Predictions saved to {file_path}")
@@ -151,7 +151,7 @@ def on_key(app6d, event: KeyEvent):
 
     elif key == "w":
         if app6d.ref_raw is not None:
-            file_path = "data/03-16/refs2/one.csv"
+            file_path = "data/04-21/refs/point_to_point.csv"
 
             save_reference_raw_to_csv(file_path, app6d.ref_raw, app6d.ref_quat_raw, dt=0.05)
 
@@ -159,9 +159,9 @@ def on_key(app6d, event: KeyEvent):
             print()
 
     elif key == ' ':
-        process_csv("data/02-16-1/refs_2/ee_trajectory_2026-02-16_15-33-07.csv", 
-                    "data/02-16-1/refs_2/ref_2026-02-16_15-33-07.csv",
-                    freq=20, downsample=1)
+        process_csv("data/04-21/refs/raw/square_3.csv", 
+                    "data/04-21/refs/processed/square_3.csv",
+                    freq=200, downsample=1)
 
 def xy_to_xyz(app6d, event: MouseEvent):
     """
