@@ -73,7 +73,7 @@ class DrawApp6D:
         # Skill library
         mode = "6d" if self.use_6d else "3d"
         self.skill_library = SkillLibrary()
-        skills = load_skills_from_models("data/04-21/models/3d", mode=mode)
+        skills = load_skills_from_models("data/04-27/models/6d", mode=mode)
         for s in skills:
             self.skill_library.add_skill(s)
         print(self.skill_library)
@@ -494,6 +494,7 @@ class DrawApp6D:
 
         self.ref_eq = skill.ref_eq
         self.ref_quat_eq = skill.ref_quat_eq
+        self.ref_force_eq = skill.ref_force_eq
         self.model_info = skill.model
 
         # R, s, t, j_end = estimate_rotation_scale_3d_search_by_count(
