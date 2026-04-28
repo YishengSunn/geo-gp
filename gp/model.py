@@ -46,15 +46,13 @@ def train_gp(
     
     params = METHOD_HPARAM.get(method_id, {'adam_lr':0.001, 'adam_steps':200})
     if hasattr(gp_model, "optimize_hyperparams") and params['adam_steps'] > 0:
-        for e in range(len(gp_model.X_list)):
-            if gp_model.localCount[e] >= MIN_POINTS_OFFLINE:
-                for p in range(2):
-                    gp_model.optimize_hyperparams_global(
-                        max_iter=params['adam_steps'],
-                        verbose=False,
-                        window_size=WINDOW_SIZE,
-                        adam_lr=params['adam_lr']
-                    )
+        if any(count >= MIN_POINTS_OFFLINE for count in gp_model.localCount):
+            gp_model.optimize_hyperparams_global(
+                max_iter=params['adam_steps'],
+                verbose=False,
+                window_size=WINDOW_SIZE,
+                adam_lr=params['adam_lr'],
+            )
                     
     return {'gp_model': gp_model, 'scaler': scaler, 'input_dim': Din}
 
