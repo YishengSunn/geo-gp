@@ -33,7 +33,7 @@ class SkyGP_MOE:
         self.drop_centers = []      # list of (D,)
         self.drop_counts = []       # list of int
         self.model_params = {}      # dict: expert_id -> dict of log params
-        self.L_all = []             # list of (Nmax, Nmax)
+        self.L_all = []             # list of (P, Nmax, Nmax)
         self.alpha_all = []         # list of (Nmax, P)
         self.pretrained_params = None
 
@@ -123,7 +123,7 @@ class SkyGP_MOE:
         self.expert_centers.append(np.zeros(self.x_dim))
         self.drop_centers.append(np.zeros(self.x_dim))
         self.drop_counts.append(0)
-        self.L_all.append(np.zeros((self.max_data, self.max_data)))
+        self.L_all.append(np.zeros((self.y_dim, self.max_data, self.max_data)))
         self.alpha_all.append(np.zeros((self.max_data, self.y_dim)))
         self.expert_usage_counts.append(0)
         self.replace_since_update.append(0)
@@ -145,7 +145,7 @@ class SkyGP_MOE:
         self.expert_centers[idx] = np.zeros(self.x_dim)
         self.drop_centers[idx] = np.zeros(self.x_dim)
         self.drop_counts[idx] = 0
-        self.L_all[idx] = np.zeros((self.max_data, self.max_data))
+        self.L_all[idx] = np.zeros((self.y_dim, self.max_data, self.max_data))
         self.alpha_all[idx] = np.zeros((self.max_data, self.y_dim))
         self.replace_since_update[idx] = 0
         self.expert_usage_counts[idx] = 0
@@ -167,8 +167,8 @@ class SkyGP_MOE:
         self.localCount[model] += 1
         # 更新中心
         self.expert_centers[model] = (x if idx == 0 else (self.expert_centers[model] * idx + x) / (idx + 1))
-        # 增量更新 L/alpha
-        self.update_param_incremental(x, y, model)
+        # Rebuild this small expert so every output has a matching kernel factor.
+        self.update_param(model)
 
         # 在线优化触发（只优化该专家，不共享）
         # 改为“全局触发”：累计一定数量新样本后做一次全局共享超参优化
@@ -193,79 +193,32 @@ class SkyGP_MOE:
     def update_param(self, model):
         if self.localCount[model] == 0:
             return
-        p = 0
         idx = self.localCount[model]
-        # >>> 改这里：用共享 or 私有log超参
-        log_sigma_f, log_sigma_n, log_lengthscale = self._get_param_logs(model, p)
-        sigma_f = np.exp(log_sigma_f)
-        sigma_n = np.exp(log_sigma_n)
-        lengthscale = np.exp(log_lengthscale)
-
         X_subset = self.X_list[model][:, :idx]
-        Y_subset = self.Y_list[model][:idx, :]  # (idx, P)
 
-        # 每个输出维度单独做 alpha
-        K = self.kernel_np(X_subset, X_subset, lengthscale, sigma_f)
-        K[np.diag_indices_from(K)] += (sigma_n ** 2)
-        try:
-            L = np.linalg.cholesky(K + 1e-6 * np.eye(idx))
-        except np.linalg.LinAlgError:
-            # 兜底
-            L = np.linalg.cholesky(K + 1e-4 * np.eye(idx))
+        if self.L_all[model].ndim != 3:
+            self.L_all[model] = np.zeros((self.y_dim, self.max_data, self.max_data))
 
-        self.L_all[model][:idx, :idx] = L
         for p in range(self.y_dim):
+            log_sigma_f, log_sigma_n, log_lengthscale = self._get_param_logs(model, p)
+            sigma_f = np.exp(log_sigma_f)
+            sigma_n = np.exp(log_sigma_n)
+            lengthscale = np.exp(log_lengthscale)
+
+            K = self.kernel_np(X_subset, X_subset, lengthscale, sigma_f)
+            K[np.diag_indices_from(K)] += (sigma_n ** 2)
+            try:
+                L = np.linalg.cholesky(K + 1e-6 * np.eye(idx))
+            except np.linalg.LinAlgError:
+                L = np.linalg.cholesky(K + 1e-4 * np.eye(idx))
+
+            self.L_all[model][p, :idx, :idx] = L
             y_p = self.Y_list[model][p, :idx]
             aux_alpha = solve_triangular(L, y_p, lower=True)
             self.alpha_all[model][:idx, p] = solve_triangular(L.T, aux_alpha, lower=False)
 
     def update_param_incremental(self, x, y, model):
-        p = 0
-        idx = self.localCount[model]
-        if idx == 0:
-            return
-
-        # >>> 改这里
-        log_sigma_f, log_sigma_n, log_lengthscale = self._get_param_logs(model, p)
-        sigma_f = np.exp(log_sigma_f)
-        sigma_n = np.exp(log_sigma_n)
-        lengthscale = np.exp(log_lengthscale)
-
-        if idx == 1:
-            # 第一条数据时，直接构建 1x1
-            kxx = self.kernel_np(x[:, None], x[:, None], lengthscale, sigma_f)[0, 0] + sigma_n**2
-            L = np.sqrt(kxx)
-            self.L_all[model][0, 0] = L
-            self.alpha_all[model][0, p] = y[p] / (L * L)
-            return
-
-        # 之前的样本
-        X_prev = self.X_list[model][:, :idx - 1]
-        # y_vals 只用于构建 alpha
-        y_vals = self.Y_list[model][p, :idx]
-
-        # 尝试使用缓存（若来自最近一次 predict）
-        cached = self.last_prediction_cache.get(model, {}).get(p, None)
-        if cached is not None and cached['k_star'].shape[0] == idx - 1:
-            b = cached['k_star']
-            Lx = cached['v']
-        else:
-            b = self.kernel_np(X_prev, x[:, None], lengthscale, sigma_f).flatten()
-            L_prev = self.L_all[model][:idx - 1, :idx - 1]
-            Lx = solve_triangular(L_prev, b, lower=True)
-
-        c = self.kernel_np(x[:, None], x[:, None], lengthscale, sigma_f)[0, 0] + sigma_n ** 2
-        Lii = np.sqrt(max(c - np.dot(Lx, Lx), 1e-9))
-
-        # 写入增量的 L（下三角）
-        self.L_all[model][:idx - 1, idx - 1] = 0.0
-        self.L_all[model][idx - 1, :idx - 1] = Lx
-        self.L_all[model][idx - 1, idx - 1] = Lii
-
-        # 重新解一次 alpha（复杂度 O(n^2)）
-        L_now = self.L_all[model][:idx, :idx]
-        aux_alpha = solve_triangular(L_now, y_vals, lower=True)
-        self.alpha_all[model][:idx, p] = solve_triangular(L_now.T, aux_alpha, lower=False)
+        self.update_param(model)
 
     def predict(self, x_query):
         """选择最近的 nearest_k 个专家做 MOE 聚合"""
@@ -295,7 +248,6 @@ class SkyGP_MOE:
                 vars_.append(np.ones(self.y_dim) * 1e6)
                 continue
 
-            L = self.L_all[idx][:n_valid, :n_valid]
             alpha = self.alpha_all[idx][:n_valid, :]
             X_snapshot = self.X_list[idx][:, :n_valid]
 
@@ -310,6 +262,11 @@ class SkyGP_MOE:
 
                 k_star = self.kernel_np(X_snapshot, x_query[:, None], lengthscale, sigma_f).flatten()
                 k_xx = sigma_f ** 2
+
+                if self.L_all[idx].ndim == 3:
+                    L = self.L_all[idx][p, :n_valid, :n_valid]
+                else:
+                    L = self.L_all[idx][:n_valid, :n_valid]
 
                 mu[p] = np.dot(k_star, alpha[:, p])
                 v = solve_triangular(L, k_star, lower=True)
@@ -327,27 +284,14 @@ class SkyGP_MOE:
             mus.append(mu)
             vars_.append(var)
 
-        # mus = np.stack(mus)     # (k, P)
-        # vars_ = np.stack(vars_) # (k, P)
-        # inv_vars = 1.0 / (vars_ + 1e-9)
-        # weights = inv_vars / np.sum(inv_vars, axis=0, keepdims=True)
-
-        # mu_moe = np.sum(weights * mus, axis=0)
-        # var_moe = np.sum(weights * vars_, axis=0)
-        # var_moe = np.clip(var_moe, 1e-6, 1e6)
-        # return mu_moe, var_moe
-
         mus = np.stack(mus)
         vars_ = np.stack(vars_)
         inv_vars = 1.0 / (vars_ + 1e-9)
-        sigma0_sq = np.exp(self.model_params[selected[0]]['log_sigma_f'][0])**2
-        mu_weighted = np.sum(inv_vars * mus, axis=0)
         denom = np.sum(inv_vars, axis=0)
-        mu_corr = mu_weighted
-        denom_corr = denom - (len(mus) - 1) / sigma0_sq
-        mu_bcm = mu_corr / (denom_corr + 1e-9)
-        var_bcm = 1.0 / (denom_corr + 1e-9)
-        return mu_bcm, var_bcm
+        mu_moe = np.sum(inv_vars * mus, axis=0) / (denom + 1e-9)
+        var_moe = 1.0 / (denom + 1e-9)
+        var_moe = np.clip(var_moe, 1e-6, 1e6)
+        return mu_moe, var_moe
 
     # ---------------------------
     # 数据写入（含创建/继承/替换逻辑）
