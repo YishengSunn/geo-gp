@@ -346,20 +346,37 @@ def smooth_prediction_by_twist_6d(
 # Save helpers
 # ============================================================
 
-def process_csv(input_path: str, output_path: str, freq: int = 20, downsample: int = 5):
+def process_csv(
+    input_path: str,
+    output_path: str,
+    freq: int = 20,
+    downsample: int = 5,
+    force_filter_win: int = 0,
+    force_filter_passes: int = 1,
+):
     """
     Process raw CSV file by adding time column and downsampling.
 
     Args:
-    - input_path: str, path to raw CSV file with columns [time, x, y, z, qx, qy, qz, qw]
-    - output_path: str, path to save processed CSV
-    - freq: int, frequency of the trajectory (for generating time column if not present)
-    - downsample: int, if > 1, take every N-th row for downsampling
+        input_path: str, path to raw CSV file with columns [time, x, y, z, qx, qy, qz, qw]
+        output_path: str, path to save processed CSV
+        freq: int, frequency of the trajectory (for generating time column if not present)
+        downsample: int, if > 1, take every N-th row for downsampling
+        force_filter_win: int, if >=3 and fx/fy/fz exist, apply centered moving-average smoothing
+        force_filter_passes: int, number of repeated smoothing passes on force columns
     """
     df = pd.read_csv(input_path)
 
     if downsample > 1:
         df = df.iloc[::downsample].reset_index(drop=True)
+
+    force_cols = ["fx", "fy", "fz"]
+    if force_filter_win >= 3 and all(c in df.columns for c in force_cols):
+        force_arr = df[force_cols].to_numpy(dtype=np.float64)
+        n_passes = max(1, int(force_filter_passes))
+        for _ in range(n_passes):
+            force_arr = moving_average_centered_pos(force_arr, int(force_filter_win))
+        df[force_cols] = force_arr
 
     dt = 1.0 / freq
     df["time"] = (np.arange(len(df)) * dt).round(2)

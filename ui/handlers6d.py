@@ -127,7 +127,7 @@ def on_key(app6d, event: KeyEvent):
         load_ref_from_csv(app6d, "data/04-21/refs/processed/point_to_point.csv")
 
     elif key == "P":
-        load_probe_from_csv(app6d, "data/04-21/probes/point_to_point.csv")
+        load_probe_from_csv(app6d, "data/04-27/refs/processed/surface_wiping_4.csv")
 
     elif key == "t":
         if app6d.use_6d:
@@ -159,9 +159,9 @@ def on_key(app6d, event: KeyEvent):
             print()
 
     elif key == ' ':
-        process_csv("data/04-21/refs/raw/square_3.csv", 
-                    "data/04-21/refs/processed/square_3.csv",
-                    freq=200, downsample=1)
+        process_csv("data/04-27/refs/raw/surface_wiping_1.csv", 
+                    "data/04-27/refs/processed/surface_wiping_1.csv",
+                    freq=200, downsample=5, force_filter_win=21, force_filter_passes=2)
 
 def xy_to_xyz(app6d, event: MouseEvent):
     """
