@@ -63,7 +63,7 @@ class DrawApp6D:
 
         # Smoothing
         self.smooth_enabled = True
-        self.smooth_win = 9
+        self.smooth_win = 15
 
         # Drawing state
         self.drawing_ref = False
