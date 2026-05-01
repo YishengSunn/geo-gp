@@ -327,41 +327,42 @@ class DrawApp6D:
 
         for attempt in range(MAX_RETRIES):
             cur_hist = probe_in_ref.copy()
-            preds_world = []
+            preds_world = np.empty((0, 3), dtype=np.float64)
             failed = False
 
-            for step in range(ROLLOUT_HORIZON):
-                if local_pred_id != self.prediction_id:
-                    print("[Predict] Cancelled by new drawing.")
-                    print()
-                    return
-                
-                preds_ref, _, _, vars_ref = rollout_reference_3d(
-                    self.model_info,
-                    torch.tensor(cur_hist, dtype=torch.float32),
-                    start_t=cur_hist.shape[0] - 1,
-                    h=1,
-                    k=k,
-                    input_type=input_type,
-                    output_type=output_type,
-                )
+            if local_pred_id != self.prediction_id:
+                print("[Predict] Cancelled by new drawing.")
+                print()
+                return
 
-                next_ref = preds_ref[-1].numpy()
+            preds_ref, _, _, vars_ref = rollout_reference_3d(
+                self.model_info,
+                torch.tensor(cur_hist, dtype=torch.float32),
+                start_t=cur_hist.shape[0] - 1,
+                h=ROLLOUT_HORIZON,
+                k=k,
+                input_type=input_type,
+                output_type=output_type,
+            )
 
-                # Ref -> Probe
-                next_world = self.s * (next_ref @ self.R.T) + self.t
-                preds_world.append(next_world)
+            preds_ref_np = preds_ref.numpy()
+            preds_world = self.s * (preds_ref_np @ self.R.T) + self.t
 
-                # Update history
-                cur_hist = np.vstack([cur_hist, next_ref])
- 
-                # Truncation Logic
-                if self.probe_goal is not None:
-                    d = np.linalg.norm(next_world - self.probe_goal)
-                    
-                    if d < GOAL_STOP_EPS and np.max(vars_ref) > 1e-3:
-                        print(f"[Predict] Reached goal at step {step}, d={d:.4f}")
-                        break
+            # Truncation logic
+            if self.probe_goal is not None and preds_world.shape[0] > 0:
+                dists_goal = np.linalg.norm(preds_world - self.probe_goal, axis=1)
+                vars_ref_arr = np.asarray(vars_ref)
+                step_unc = vars_ref_arr if vars_ref_arr.ndim == 1 else np.max(vars_ref_arr, axis=1)
+                stop_idx = np.where((dists_goal < GOAL_STOP_EPS) & (step_unc > 1e-3))[0]
+                if stop_idx.size > 0:
+                    i_stop = int(stop_idx[0])
+                    print(f"[Predict] Reached goal at step {i_stop}, d={dists_goal[i_stop]:.4f}")
+                    preds_ref_np = preds_ref_np[:i_stop+1]
+                    preds_world = preds_world[:i_stop+1]
+                    vars_ref = vars_ref[:i_stop+1]
+
+            # Update history once for geometric drift check
+            cur_hist = np.vstack([cur_hist, preds_ref_np])
 
             # Geometric drift check
             mse_full = geom_mse(cur_hist, self.ref_eq, min(len(cur_hist), len(self.ref_eq)))
@@ -372,8 +373,6 @@ class DrawApp6D:
                 failed = True
 
             if not failed:
-                preds_world = np.asarray(preds_world)
-
                 # Robust start selection: enforce temporal consistency
                 probe_end = self.probe_eq[-1]
 
@@ -520,59 +519,57 @@ class DrawApp6D:
             cur_quat = self.probe_quat_eq.copy()[:cur_pos.shape[0]]
             cur_force = None if self.probe_force_eq is None else self.probe_force_eq.copy()[:cur_pos.shape[0]]
 
-            preds_world_pos = []
-            preds_world_quat = []
-            preds_world_force = []
+            preds_world_pos = np.empty((0, 3), dtype=np.float64)
+            preds_world_quat = np.empty((0, 4), dtype=np.float64)
+            preds_world_force = None
             failed = False
 
-            for step in range(ROLLOUT_HORIZON):
-                if local_pred_id != self.prediction_id:
-                    print("[Predict] Cancelled by new drawing.")
-                    print()
-                    return
+            if local_pred_id != self.prediction_id:
+                print("[Predict] Cancelled by new drawing.")
+                print()
+                return
 
-                tp = torch.tensor(cur_pos, dtype=torch.float32)
-                tq = torch.tensor(cur_quat, dtype=torch.float32)
-                tf = None if cur_force is None else torch.tensor(cur_force, dtype=torch.float32)
+            tp = torch.tensor(cur_pos, dtype=torch.float32)
+            tq = torch.tensor(cur_quat, dtype=torch.float32)
+            tf = None if cur_force is None else torch.tensor(cur_force, dtype=torch.float32)
 
-                preds_ref_pos, preds_quat, preds_ref_force, _, _, _, vars_ref = rollout_reference_6d(
-                    self.model_info,
-                    tp,
-                    tq,
-                    start_t=cur_pos.shape[0] - 1,
-                    h=1,
-                    k=k,
-                    input_type=input_type,
-                    output_type=output_type,
-                    R_ref_probe=self.R,
-                    traj_force=tf,
-                )
+            preds_ref_pos, preds_quat, preds_ref_force, _, _, _, vars_ref = rollout_reference_6d(
+                self.model_info,
+                tp,
+                tq,
+                start_t=cur_pos.shape[0] - 1,
+                h=ROLLOUT_HORIZON,
+                k=k,
+                input_type=input_type,
+                output_type=output_type,
+                R_ref_probe=self.R,
+                traj_force=tf,
+            )
 
-                next_ref_pos = preds_ref_pos[-1].numpy()
+            preds_ref_pos_np = preds_ref_pos.numpy()
+            preds_world_pos = self.s * (preds_ref_pos_np @ self.R.T) + self.t
+            preds_world_quat = preds_quat.numpy()
+            if preds_ref_force is not None:
+                preds_world_force = preds_ref_force.numpy()
 
-                # Ref -> Probe
-                next_world_pos = self.s * (next_ref_pos @ self.R.T) + self.t
-                next_world_quat = preds_quat[-1].numpy()
+            # Truncation logic
+            if self.probe_goal is not None and preds_world_pos.shape[0] > 0:
+                dists_goal = np.linalg.norm(preds_world_pos - self.probe_goal, axis=1)
+                vars_ref_arr = np.asarray(vars_ref)
+                step_unc = vars_ref_arr if vars_ref_arr.ndim == 1 else np.max(vars_ref_arr, axis=1)
+                stop_idx = np.where((dists_goal < GOAL_STOP_EPS) & (step_unc > 1e-3))[0]
+                if stop_idx.size > 0:
+                    i_stop = int(stop_idx[0])
+                    print(f"[Predict] Reached goal at step {i_stop}, d={dists_goal[i_stop]:.4f}")
+                    preds_ref_pos_np = preds_ref_pos_np[:i_stop+1]
+                    preds_world_pos = preds_world_pos[:i_stop+1]
+                    preds_world_quat = preds_world_quat[:i_stop+1]
+                    vars_ref = vars_ref[:i_stop+1]
+                    if preds_world_force is not None:
+                        preds_world_force = preds_world_force[:i_stop+1]
 
-                preds_world_pos.append(next_world_pos)
-                preds_world_quat.append(next_world_quat)
-                if preds_ref_force is not None:
-                    next_world_force = preds_ref_force[-1].numpy()
-                    preds_world_force.append(next_world_force)
-
-                # Update history
-                cur_pos = np.vstack([cur_pos, next_ref_pos])
-                cur_quat = np.vstack([cur_quat, next_world_quat[None, :]])
-                if cur_force is not None and preds_ref_force is not None:
-                    cur_force = np.vstack([cur_force, next_world_force[None, :]])
-                
-                # Truncation logic
-                if self.probe_goal is not None:
-                    d = np.linalg.norm(next_world_pos - self.probe_goal)
-
-                    if d < GOAL_STOP_EPS and np.max(vars_ref) > 1e-3:
-                        print(f"[Predict] Reached goal at step {step}, d={d:.4f}")
-                        break
+            # Update history once for geometric drift check
+            cur_pos = np.vstack([cur_pos, preds_ref_pos_np])
 
             # Geometric drift check
             mse_full = geom_mse(cur_pos, self.ref_eq, min(len(cur_pos), len(self.ref_eq)))
@@ -583,10 +580,6 @@ class DrawApp6D:
                 failed = True
 
             if not failed:
-                preds_world_pos = np.asarray(preds_world_pos)
-                preds_world_quat = np.asarray(preds_world_quat)
-                preds_world_force = np.asarray(preds_world_force) if len(preds_world_force) else None
-
                 # Robust start selection: enforce temporal consistency
                 probe_end = self.probe_eq[-1]
 

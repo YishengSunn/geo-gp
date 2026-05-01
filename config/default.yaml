@@ -23,7 +23,7 @@ dataset:
 # GP hyperparameters
 # ============================================================
 gp:
-  nearest_k: 2
+  nearest_k: 1
   max_experts: 40
   max_data_per_expert: 50
   min_points_offline: 1
