@@ -353,6 +353,10 @@ def process_csv(
     downsample: int = 5,
     force_filter_win: int = 0,
     force_filter_passes: int = 1,
+    trim_static: bool = False,
+    static_pos_eps: float = 8e-4,
+    static_ang_eps_deg: float = 1.2,
+    static_min_run: int = 8,
 ):
     """
     Process raw CSV file by adding time column and downsampling.
@@ -364,6 +368,10 @@ def process_csv(
         downsample: int, if > 1, take every N-th row for downsampling
         force_filter_win: int, if >=3 and fx/fy/fz exist, apply centered moving-average smoothing
         force_filter_passes: int, number of repeated smoothing passes on force columns
+        trim_static: bool, remove leading/trailing static segments only
+        static_pos_eps: float, positional threshold (meters) for static detection
+        static_ang_eps_deg: float, rotational threshold (degrees) for static detection
+        static_min_run: int, minimum consecutive static transitions to trim
     """
     df = pd.read_csv(input_path)
 
@@ -378,8 +386,53 @@ def process_csv(
             force_arr = moving_average_centered_pos(force_arr, int(force_filter_win))
         df[force_cols] = force_arr
 
+    if trim_static and len(df) >= 3 and all(c in df.columns for c in ["x", "y", "z"]):
+        pos = df[["x", "y", "z"]].to_numpy(dtype=np.float64)
+        dpos = np.linalg.norm(np.diff(pos, axis=0), axis=1)
+
+        has_quat = all(c in df.columns for c in ["qx", "qy", "qz", "qw"])
+        if has_quat:
+            qxyzw = df[["qx", "qy", "qz", "qw"]].to_numpy(dtype=np.float64)
+            q_wxyz = np.column_stack([qxyzw[:, 3], qxyzw[:, 0], qxyzw[:, 1], qxyzw[:, 2]])
+            q_wxyz = q_wxyz / np.clip(np.linalg.norm(q_wxyz, axis=1, keepdims=True), 1e-12, None)
+            dots = np.abs(np.sum(q_wxyz[:-1] * q_wxyz[1:], axis=1))
+            dots = np.clip(dots, -1.0, 1.0)
+            dang_deg = np.degrees(2.0 * np.arccos(dots))
+        else:
+            dang_deg = np.zeros_like(dpos)
+
+        static_steps = (dpos <= float(static_pos_eps)) & (dang_deg <= float(static_ang_eps_deg))
+
+        left_run = 0
+        while left_run < len(static_steps) and static_steps[left_run]:
+            left_run += 1
+
+        right_run = 0
+        while right_run < len(static_steps) and static_steps[-1 - right_run]:
+            right_run += 1
+
+        start_idx = left_run if left_run >= int(static_min_run) else 0
+        end_idx = len(df) - right_run if right_run >= int(static_min_run) else len(df)
+
+        # Keep at least 2 points to avoid empty/invalid outputs
+        if end_idx - start_idx >= 2 and (start_idx > 0 or end_idx < len(df)):
+            n_before = len(df)
+            df = df.iloc[start_idx:end_idx].reset_index(drop=True)
+            print(
+                f"[Process CSV] Trimmed static head/tail: "
+                f"{start_idx} + {n_before - end_idx} rows (kept {len(df)}/{n_before})"
+            )
+
     dt = 1.0 / freq
     df["time"] = (np.arange(len(df)) * dt).round(2)
+
+    # Keep force decimal precision consistent with position columns
+    pos_cols = ["x", "y", "z"]
+    if all(c in df.columns for c in pos_cols):
+        pos_decimals = 6
+        df[pos_cols] = df[pos_cols].round(pos_decimals)
+        if all(c in df.columns for c in force_cols):
+            df[force_cols] = df[force_cols].round(pos_decimals)
 
     df.to_csv(output_path, index=False)
 
