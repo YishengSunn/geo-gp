@@ -46,17 +46,28 @@ def train_gp(
     
     params = METHOD_HPARAM.get(method_id, {'adam_lr':0.001, 'adam_steps':200})
     if hasattr(gp_model, "optimize_hyperparams") and params['adam_steps'] > 0:
-        for e in range(len(gp_model.X_list)):
-            if gp_model.localCount[e] >= MIN_POINTS_OFFLINE:
-                for p in range(2):
-                    gp_model.optimize_hyperparams_global(
-                        max_iter=params['adam_steps'],
-                        verbose=False,
-                        window_size=WINDOW_SIZE,
-                        adam_lr=params['adam_lr']
-                    )
+        if any(count >= MIN_POINTS_OFFLINE for count in gp_model.localCount):
+            gp_model.optimize_hyperparams_global(
+                max_iter=params['adam_steps'],
+                verbose=False,
+                window_size=WINDOW_SIZE,
+                adam_lr=params['adam_lr'],
+            )
                     
-    return {'gp_model': gp_model, 'scaler': scaler, 'input_dim': Din}
+    x_mean_np = torch_to_np(scaler.X_mean).astype(np.float64)
+    x_std_np = torch_to_np(scaler.X_std).astype(np.float64)
+    y_mean_np = torch_to_np(scaler.Y_mean).astype(np.float64)
+    y_std_np = torch_to_np(scaler.Y_std).astype(np.float64)
+
+    return {
+        'gp_model': gp_model,
+        'scaler': scaler,
+        'input_dim': Din,
+        'x_mean_np': x_mean_np,
+        'x_std_np': x_std_np,
+        'y_mean_np': y_mean_np,
+        'y_std_np': y_std_np,
+    }
 
 def gp_predict(
     info: dict[str, object],
@@ -73,13 +84,24 @@ def gp_predict(
         y: numpy array of shape (1, D_out)
         var: variance of prediction
     """
-    gp_model, scaler = info['gp_model'], info['scaler']
-    x = torch_to_np(feat_1xD.squeeze(0).float())  # Shape: (D_in,)
-    
-    mu, var = gp_model.predict(torch_to_np(scaler.x_transform(torch.tensor(x))))
+    gp_model = info['gp_model']
+    x = torch_to_np(feat_1xD.squeeze(0).float()).astype(np.float64, copy=False)  # Shape: (D_in,)
 
-    mu = np.array(mu).reshape(1, -1)  # Ensure shape is (1, D_out)
-    y = torch_to_np(scaler.y_inverse(torch.tensor(mu)))  # Shape: (1, D_out)
+    x_mean = info.get('x_mean_np')
+    x_std = info.get('x_std_np')
+    y_mean = info.get('y_mean_np')
+    y_std = info.get('y_std_np')
+
+    if x_mean is not None and x_std is not None and y_mean is not None and y_std is not None:
+        x_norm = (x - x_mean) / x_std
+        mu_norm, var = gp_model.predict(x_norm)
+        mu_norm = np.asarray(mu_norm, dtype=np.float64).reshape(1, -1)
+        y = mu_norm * y_std.reshape(1, -1) + y_mean.reshape(1, -1)
+    else:
+        scaler = info['scaler']
+        mu, var = gp_model.predict(torch_to_np(scaler.x_transform(torch.tensor(x))))
+        mu = np.array(mu).reshape(1, -1)
+        y = torch_to_np(scaler.y_inverse(torch.tensor(mu)))
 
     return y, var
 
@@ -229,6 +251,9 @@ def rollout_reference_6d(
     emit_force = traj_force is not None and (d_out >= 10)
 
     R_ref_probe = torch.tensor(R_ref_probe, dtype=torch.float32) if R_ref_probe is not None else None
+    q_ref_probe = None
+    if R_ref_probe is not None:
+        q_ref_probe = torch.tensor(rotmat_to_quat(R_ref_probe), dtype=torch.float32, device=traj_pos.device)
 
     T = traj_pos.shape[0]
     if not emit_force:
@@ -305,7 +330,6 @@ def rollout_reference_6d(
 
             # Transform delta to probe frame
             if R_ref_probe is not None:
-                q_ref_probe = torch.tensor(rotmat_to_quat(R_ref_probe), dtype=torch.float32)
                 dq = quat_mul(quat_mul(quat_inv(q_ref_probe), dq), q_ref_probe)
                 dq = quat_normalize(dq)
 
@@ -321,7 +345,6 @@ def rollout_reference_6d(
             next_q = quat_normalize(y_pose[3:7])
 
             if R_ref_probe is not None:
-                q_ref_probe = torch.tensor(rotmat_to_quat(R_ref_probe), dtype=torch.float32)
                 next_q = quat_mul(q_ref_probe, next_q)
                 next_q = quat_normalize(next_q)
 

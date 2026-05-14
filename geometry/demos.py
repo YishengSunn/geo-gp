@@ -138,21 +138,31 @@ def load_demo_circles_with_orientation(app6d, *, T=400, r_ref=0.5, r_probe=1.0):
     print(f"[Demo] Loaded circles with quaternion orientation: ref_raw={len(app6d.ref_raw)}, probe_raw={len(app6d.probe_raw)}")
     print()
 
-def load_ref_from_csv(app6d, filepath):
+def load_pose_force_from_csv(filepath):
     """
-    Load position and quaternion from CSV with fields:
-    time,x,y,z,qx,qy,qz,qw
-
-    Quaternion will be converted to [w, x, y, z].
+    Load position, quaternion, and optionally force from a CSV file.
+    The CSV file should have the following columns: time,x,y,z,qx,qy,qz,qw
+    If fx,fy,fz columns are present, they will be loaded as well.
+    The quaternion will be converted to [w, x, y, z] format.
 
     Args:
         filepath: str, path to the CSV file
+
+    Returns:
+        pts: list of [x, y, z] positions
+        quats: (N,4) array of quaternions in [w, x, y, z] format
+        forces: (N,3) array of forces if fx,fy,fz are present, otherwise None
     """
     pts = []
     quats = []
+    forces = []
+    has_force = False
 
-    with open(filepath, "r") as f:
+    with open(filepath, "r", newline="") as f:
         reader = csv.DictReader(f)
+        fieldnames = set(reader.fieldnames or [])
+        has_force = {"fx", "fy", "fz"}.issubset(fieldnames)
+
         for row in reader:
             try:
                 x = float(row["x"])
@@ -164,11 +174,34 @@ def load_ref_from_csv(app6d, filepath):
                 qz = float(row["qz"])
                 qw = float(row["qw"])
 
+                if has_force:
+                    fx = float(row["fx"])
+                    fy = float(row["fy"])
+                    fz = float(row["fz"])
+                    forces.append([fx, fy, fz])
+
                 pts.append([x, y, z])
                 quats.append([qw, qx, qy, qz])
 
-            except Exception:
+            except (KeyError, TypeError, ValueError):
                 continue
+
+    force_arr = np.asarray(forces, dtype=np.float64) if has_force else None
+
+    return pts, np.asarray(quats, dtype=np.float64), force_arr
+
+def load_ref_from_csv(app6d, filepath):
+    """
+    Load position and quaternion from CSV with fields:
+    time,x,y,z,qx,qy,qz,qw
+
+    If fx,fy,fz columns are present, load force as well.
+    Quaternion will be converted to [w, x, y, z].
+
+    Args:
+        filepath: str, path to the CSV file
+    """
+    pts, quats, forces = load_pose_force_from_csv(filepath)
 
     if len(pts) == 0:
         print("[LoadCSV] No valid rows found!")
@@ -176,11 +209,14 @@ def load_ref_from_csv(app6d, filepath):
         return
 
     app6d.ref_raw = pts
-    app6d.ref_quat_raw = np.asarray(quats, dtype=np.float64)
+    app6d.ref_quat_raw = quats
+    app6d.ref_force_raw = forces
+    app6d.ref_force_eq = None
 
     app6d.update_ref_lines()
 
-    print(f"[LoadCSV] Loaded {len(app6d.ref_raw)} reference points with orientation.")
+    force_msg = " and force" if app6d.ref_force_raw is not None else ""
+    print(f"[LoadCSV] Loaded {len(app6d.ref_raw)} reference points with orientation{force_msg}.")
     print()
 
 def load_probe_from_csv(app6d, filepath):
@@ -188,32 +224,13 @@ def load_probe_from_csv(app6d, filepath):
     Load position and quaternion from CSV with fields:
     time,x,y,z,qx,qy,qz,qw
 
+    If fx,fy,fz columns are present, load force as well.
     Quaternion will be converted to [w, x, y, z].
 
     Args:
         filepath: str, path to the CSV file
     """
-    pts = []
-    quats = []
-
-    with open(filepath, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            try:
-                x = float(row["x"])
-                y = float(row["y"])
-                z = float(row["z"])
-
-                qx = float(row["qx"])
-                qy = float(row["qy"])
-                qz = float(row["qz"])
-                qw = float(row["qw"])
-
-                pts.append([x, y, z])
-                quats.append([qw, qx, qy, qz])
-
-            except Exception:
-                continue
+    pts, quats, forces = load_pose_force_from_csv(filepath)
 
     if len(pts) == 0:
         print("[LoadCSV] No valid rows found!")
@@ -221,9 +238,12 @@ def load_probe_from_csv(app6d, filepath):
         return
 
     app6d.probe_raw = pts
-    app6d.probe_quat_raw = np.asarray(quats, dtype=np.float64)
+    app6d.probe_quat_raw = quats
+    app6d.probe_force_raw = forces
+    app6d.probe_force_eq = None
 
     app6d.update_probe_lines()
 
-    print(f"[LoadCSV] Loaded {len(app6d.probe_raw)} probe points with orientation.")
+    force_msg = " and force" if app6d.probe_force_raw is not None else ""
+    print(f"[LoadCSV] Loaded {len(app6d.probe_raw)} probe points with orientation{force_msg}.")
     print()
