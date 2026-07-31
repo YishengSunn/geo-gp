@@ -5,7 +5,8 @@ from matplotlib.backend_bases import MouseEvent, KeyEvent
 from geometry.demos import (load_demo_spirals, load_demo_circles_with_orientation, 
                             load_ref_from_csv, load_probe_from_csv
 )
-from utils.misc import process_csv, save_reference_raw_to_csv, save_predictions_to_csv
+from utils.misc import (process_csv, save_reference_raw_to_csv, 
+                        save_probe_raw_to_csv, save_predictions_to_csv)
 
 
 def on_press(app6d, event: MouseEvent):
@@ -125,10 +126,10 @@ def on_key(app6d, event: KeyEvent):
         load_demo_circles_with_orientation(app6d)
 
     elif key == "R":
-        load_ref_from_csv(app6d, "data/05-08/refs/processed/arc1/arc1_1.csv")
+        load_ref_from_csv(app6d, "data/06-02/refs/processed/arc_1.csv")
 
     elif key == "P":
-        load_probe_from_csv(app6d, "data/05-08/refs/processed/arc1/arc1_1.csv")
+        load_probe_from_csv(app6d, "data/06-02/refs/processed/arc_1.csv")
 
     elif key == "t":
         if app6d.use_6d:
@@ -143,21 +144,38 @@ def on_key(app6d, event: KeyEvent):
             app6d.process_probe_and_predict()
 
     elif key == "s":
+        if app6d.ref_raw is not None and len(app6d.ref_raw) > 0:
+            file_path = Path("data/07-30/refs/raw/arc_1.csv")
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            save_reference_raw_to_csv(
+                str(file_path),
+                app6d.ref_raw,
+                app6d.ref_quat_raw,
+                dt=0.005,
+            )
+
+        if app6d.probe_raw is not None and len(app6d.probe_raw) > 0:
+            file_path = Path("data/07-30/preds/arc/arc_1/prompt.csv")
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            save_probe_raw_to_csv(
+                str(file_path),
+                app6d.probe_raw,
+                app6d.probe_quat_raw,
+                dt=0.005,
+            )
+
         if app6d.preds is not None and app6d.preds_quat is not None:
-            file_path = "data/05-08/refs/processed/arc1/arc1_1.csv"
+            file_path = Path("data/07-30/preds/arc/arc_1/prediction.csv")
+            file_path.parent.mkdir(parents=True, exist_ok=True)
 
-            save_predictions_to_csv(file_path, app6d.preds, app6d.preds_quat, dt=0.05)
-            print(f"[UI] Predictions saved to {file_path}")
-            print()
-
-    elif key == "w":
-        if app6d.ref_raw is not None:
-            file_path = "data/05-08/refs/processed/arc1/arc1_1.csv"
-
-            save_reference_raw_to_csv(file_path, app6d.ref_raw, app6d.ref_quat_raw, dt=0.05)
-
-            print(f"[UI] Reference raw saved to {file_path}")
-            print()
+            save_predictions_to_csv(
+                str(file_path),
+                app6d.preds,
+                app6d.preds_quat,
+                dt=0.005,
+            )
 
     elif key == ' ':
         raw_root = Path("data/05-08/refs/raw")

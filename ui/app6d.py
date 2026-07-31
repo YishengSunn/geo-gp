@@ -73,7 +73,7 @@ class DrawApp6D:
         # Skill library
         mode = "6d" if self.use_6d else "3d"
         self.skill_library = SkillLibrary()
-        skills = load_skills_from_models("data/04-27/models/6d", mode=mode)
+        skills = load_skills_from_models("data/06-02/models/6d", mode=mode)
         for s in skills:
             self.skill_library.add_skill(s)
         print(self.skill_library)
@@ -99,8 +99,8 @@ class DrawApp6D:
         self.ax_xy.set_xlim(-1.0, 1.0)
         self.ax_xy.set_ylim(-1.0, 1.0)
 
-        self.ax_yz.set_xlim(0.0, 0.25)
-        self.ax_yz.set_ylim(0.0, 0.25)
+        self.ax_yz.set_xlim(-1.0, 1.0)
+        self.ax_yz.set_ylim(-1.0, 1.0)
 
         # Init lines (2D)
         (self.line_ref_xy,) = self.ax_xy.plot([], [], lw=2.5, c='r', label="ref")
@@ -312,8 +312,8 @@ class DrawApp6D:
         # R, s, t = estimate_rotation_scale_3d_search_by_count(
         #     self.ref_eq,
         #     self.probe_eq,
-        #     margin_pts=300,
-        #     step=10,
+        #     margin_pts=1000,
+        #     step=15,
         # )[:3]
 
         self.R, self.s, self.t = R, s, t

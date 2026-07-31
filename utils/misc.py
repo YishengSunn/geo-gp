@@ -496,6 +496,64 @@ def save_reference_raw_to_csv(
 
     print(f"[Save] Reference raw trajectory saved to {filepath}")
 
+def save_probe_raw_to_csv(
+    filepath: str,
+    probe_pos: np.ndarray,
+    probe_quat: np.ndarray,
+    *,
+    dt: float = 0.05,
+):
+    """
+    Save raw probe trajectory (position + quaternion) to CSV.
+
+    Args:
+        filepath: str, output CSV file path
+        probe_pos: (N,3) np.ndarray, probe positions
+        probe_quat: (N,4) np.ndarray, probe orientations [w,x,y,z]
+        dt: float, time step between points
+    """
+    if probe_pos is None:
+        raise ValueError("probe_pos is None")
+
+    P = np.asarray(probe_pos, dtype=np.float64)
+    N = len(P)
+
+    if probe_quat is None:
+        Q = np.zeros((N, 4))
+        Q[:, 0] = 1.0
+    else:
+        Q = np.asarray(probe_quat, dtype=np.float64)
+
+    assert len(P) == len(Q), f"Length mismatch: probe_pos={len(P)}, probe_quat={len(Q)}"
+
+    with open(filepath, "w", newline="") as f:
+        writer = csv.writer(f)
+
+        writer.writerow([
+            "time",
+            "x", "y", "z",
+            "qx", "qy", "qz", "qw"
+        ])
+
+        for i in range(N):
+            t = i * dt
+
+            x, y, z = P[i]
+            qw, qx, qy, qz = Q[i]
+
+            writer.writerow([
+                round(float(t), 4),
+                round(float(x), 6),
+                round(float(y), 6),
+                round(float(z), 6),
+                round(float(qx), 6),
+                round(float(qy), 6),
+                round(float(qz), 6),
+                round(float(qw), 6),
+            ])
+
+    print(f"[Save] Probe raw trajectory saved to {filepath}")
+
 def save_predictions_to_csv(
     filepath: str,
     preds: np.ndarray,
