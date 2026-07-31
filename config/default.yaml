@@ -9,9 +9,9 @@ experiment:
 # ============================================================
 sampling:
   k_hist: 10          # Seed history length
-  sample_hz: 20      # Sample frequency for equal-dt resampling
+  sample_hz: 200      # Sample frequency for equal-dt resampling
   default_speed: 0.2  # Convert polyline length to time for equal-time sampling
-  smooth_win: 15       # Smoothing window size for trajectory smoothing
+  smooth_win: 15      # Smoothing window size for trajectory smoothing
 
 # ============================================================
 # Dataset
@@ -23,9 +23,9 @@ dataset:
 # GP hyperparameters
 # ============================================================
 gp:
-  nearest_k: 2
-  max_experts: 40
-  max_data_per_expert: 50
+  nearest_k: 1
+  max_experts: 50
+  max_data_per_expert: 60
   min_points_offline: 1
   window_size: null   # Sliding window size (None means not used)
 
@@ -41,7 +41,7 @@ method:
 # ============================================================
 prediction:
   rollout_horizon: 2000  # Max steps to rollout
-  mse_thresh: 0.01        # Threshold for geometric drift detection during rollout
+  mse_thresh: 0.01       # Threshold for geometric drift detection during rollout
   goal_stop_eps: 0.05    # Stop if within this distance to goal
   max_start_jump: 0.05   # Max allowed jump at the start of the trajectory
   drop_k: 5              # Number of probe points to drop on each retry after drift detection
