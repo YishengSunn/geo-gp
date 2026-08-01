@@ -1,4 +1,5 @@
 import csv
+import json
 import torch
 import numpy as np
 import pandas as pd
@@ -557,7 +558,7 @@ def save_probe_raw_to_csv(
 def save_predictions_to_csv(
     filepath: str,
     preds: np.ndarray,
-    preds_quat: np.ndarray,
+    preds_quat: np.ndarray | None,
     *,
     dt: float = 0.005,
 ):
@@ -567,18 +568,23 @@ def save_predictions_to_csv(
     Args:
         filepath: str, output CSV file path
         preds: (N, 3) np.ndarray, predicted positions
-        preds_quat: (N, 4) np.ndarray, predicted orientations as quaternions [w, x, y, z]
+        preds_quat: Optional (N, 4) predicted orientations as quaternions
+            [w, x, y, z]. If omitted, identity quaternions are written.
         dt: float, time step between predictions (for generating timestamps)
     """
-    if preds is None or preds_quat is None:
-        raise ValueError("preds or preds_quat is None")
+    if preds is None:
+        raise ValueError("preds is None")
 
     P = np.asarray(preds, dtype=np.float64)
-    Q = np.asarray(preds_quat, dtype=np.float64)
+    N = len(P)
+
+    if preds_quat is None:
+        Q = np.zeros((N, 4), dtype=np.float64)
+        Q[:, 0] = 1.0
+    else:
+        Q = np.asarray(preds_quat, dtype=np.float64)
 
     assert len(P) == len(Q), f"Length mismatch: preds has {len(P)} points, preds_quat has {len(Q)} points"
-
-    N = len(P)
 
     with open(filepath, "w", newline="") as f:
         writer = csv.writer(f)
@@ -602,6 +608,57 @@ def save_predictions_to_csv(
             ])
 
     print(f"[Save] Predictions saved to {filepath}")
+
+def save_similarity_transform_to_json(
+    filepath: str,
+    R: np.ndarray,
+    s: float,
+    t: np.ndarray,
+    *,
+    skill_name: str,
+    match_ms: float,
+    j_end: int,
+) -> None:
+    """Save a similarity transform and its matching metadata to JSON.
+
+    The output format matches the existing ``similarity_transform_*.json``
+    files under ``data``.
+
+    Args:
+        filepath: Output JSON file path.
+        R: Rotation matrix with shape (3, 3).
+        s: Isotropic scale factor.
+        t: Translation vector with shape (3,).
+        skill_name: Name of the matched skill.
+        match_ms: Skill-matching duration in milliseconds.
+        j_end: End index of the matched reference segment.
+
+    Raises:
+        ValueError: If the rotation matrix or translation vector has an
+            invalid shape.
+    """
+    R_arr = np.asarray(R, dtype=np.float64)
+    t_arr = np.asarray(t, dtype=np.float64).reshape(-1)
+
+    if R_arr.shape != (3, 3):
+        raise ValueError(f"Expected R shape (3, 3), got {R_arr.shape}")
+    if t_arr.shape != (3,):
+        raise ValueError(f"Expected t shape (3,), got {t_arr.shape}")
+
+    payload = {
+        "skill_name": str(skill_name),
+        "match_ms": round(float(match_ms), 3),
+        "j_end": int(j_end),
+        "s": round(float(s), 8),
+        "t": [round(float(v), 8) for v in t_arr.tolist()],
+        "R": [[round(float(v), 8) for v in row] for row in R_arr.tolist()],
+    }
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+        f.write("\n")
+
+    print(f"[Save] Similarity transform saved to {filepath}")
 
 # ============================================================
 # Plot helpers

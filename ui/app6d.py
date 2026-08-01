@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+from time import perf_counter
 
 from config.runtime import (
     SAMPLE_HZ, DEFAULT_SPEED, TRAIN_RATIO, K_HIST, METHOD_ID,
@@ -53,6 +54,9 @@ class DrawApp6D:
         self.R = None
         self.s = None
         self.t = None
+        self.skill_name = None
+        self.match_ms = None
+        self.j_end = None
 
         self.gt = None           # np.ndarray (H,3), ground truth trajectory
         self.preds = None        # np.ndarray (H,3), predicted trajectory
@@ -73,7 +77,7 @@ class DrawApp6D:
         # Skill library
         mode = "6d" if self.use_6d else "3d"
         self.skill_library = SkillLibrary()
-        skills = load_skills_from_models("data/06-02/models/6d", mode=mode)
+        skills = load_skills_from_models("data/07-30/models/3d", mode=mode)
         for s in skills:
             self.skill_library.add_skill(s)
         print(self.skill_library)
@@ -96,11 +100,11 @@ class DrawApp6D:
         self.ax_xy.set_aspect("equal", adjustable="box")
         self.ax_yz.set_aspect("equal", adjustable="box")
 
-        self.ax_xy.set_xlim(-1.0, 1.0)
-        self.ax_xy.set_ylim(-1.0, 1.0)
+        self.ax_xy.set_xlim(-0.5, 0.5)
+        self.ax_xy.set_ylim(-0.5, 0.5)
 
-        self.ax_yz.set_xlim(-1.0, 1.0)
-        self.ax_yz.set_ylim(-1.0, 1.0)
+        self.ax_yz.set_xlim(-0.5, 0.5)
+        self.ax_yz.set_ylim(-0.5, 0.5)
 
         # Init lines (2D)
         (self.line_ref_xy,) = self.ax_xy.plot([], [], lw=2.5, c='r', label="ref")
@@ -304,7 +308,8 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
         # 2) Alignment
-        skill, (R, s, t, _) = self.skill_library.match(self.probe_eq)
+        match_start = perf_counter()
+        skill, (R, s, t, j_end) = self.skill_library.match(self.probe_eq)
 
         self.ref_eq = skill.ref_eq
         self.model_info = skill.model
@@ -317,6 +322,9 @@ class DrawApp6D:
         # )[:3]
 
         self.R, self.s, self.t = R, s, t
+        self.skill_name = skill.name
+        self.match_ms = (perf_counter() - match_start) * 1000.0
+        self.j_end = int(j_end)
 
         # 3) Transform probe into ref frame
         probe_in_ref = ((self.probe_eq - t) / s) @ R
@@ -489,6 +497,7 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
         # 2) Alignment
+        match_start = perf_counter()
         skill, (R, s, t, j_end) = self.skill_library.match(self.probe_eq, margin_pts=1000)
 
         self.ref_eq = skill.ref_eq
@@ -504,6 +513,9 @@ class DrawApp6D:
         # )[:4]
 
         self.R, self.s, self.t = R, s, t
+        self.skill_name = skill.name
+        self.match_ms = (perf_counter() - match_start) * 1000.0
+        self.j_end = int(j_end)
 
         # 3) Transform probe into ref frame
         probe_in_ref = ((self.probe_eq - t) / s) @ R
@@ -854,6 +866,8 @@ class DrawApp6D:
         self.model_info = None
         self.probe_goal = None
         self.R = self.s = self.t = None
+        self.skill_name = None
+        self.match_ms = self.j_end = None
         self.prediction_id += 1
 
         # Remove existing orientation quivers from the plot
