@@ -1,6 +1,6 @@
-import torch
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
 from scipy.linalg import solve_triangular
 
 
@@ -479,8 +479,7 @@ class SkyGP_MOE:
         return K, K_rbf, sqd, sigma_f, sigma_n, lengthscale
 
     def _mll_and_grad_for_output(self, X, y, log_sigma_f, log_sigma_n, log_lengthscale, jitter=1e-6):
-        """
-        X: (D, m), y: (m,)
+        """X: (D, m), y: (m,)
         返回 (负对数边际似然, 负梯度) 以便最小化
         """
         K, K_rbf, sqd, sigma_f, sigma_n, lengthscale = self._build_K(
@@ -544,8 +543,7 @@ class SkyGP_MOE:
         weight_decay=0.0,     # 可选 L2 正则
         jitter=1e-6           # 数值稳定的抖动
     ):
-        """
-        仅对 expert_idx 的第 p 个输出维度做窗口化 MLE, 用 PyTorch Adam 优化 log-超参。
+        """仅对 expert_idx 的第 p 个输出维度做窗口化 MLE, 用 PyTorch Adam 优化 log-超参。
         成功后回填到 numpy, 并重建该专家的 Cholesky(update_param)。
         """
         # 添加到函数开始处
@@ -662,8 +660,7 @@ class SkyGP_MOE:
         return success
 
     def init_global_params(self, pretrained_params=None):
-            """
-            初始化全局共享超参（log 形式）。
+            """初始化全局共享超参（log 形式）。
             - y_dim==1: log_lengthscale.shape = (D,)
             - y_dim>1 : log_lengthscale.shape = (D, P)  (每个输出一套 lengthscale)
             """
@@ -694,8 +691,7 @@ class SkyGP_MOE:
             }
 
     def _get_param_logs(self, expert_idx, p):
-        """
-        统一入口: 拿到“log 参数”。若有全局共享，则用全局；否则回退到该专家的私有。
+        """统一入口: 拿到“log 参数”。若有全局共享，则用全局；否则回退到该专家的私有。
         返回: (log_sigma_f_p, log_sigma_n_p, log_lengthscale_p) 其中 log_lengthscale_p 形状为 (D,)
         """
         if self.global_params is not None:
@@ -734,8 +730,7 @@ class SkyGP_MOE:
         weight_decay=0.0,
         jitter=1e-6
     ):
-        """
-        用所有专家的数据（每个专家取最近 window_size 个样本）联合最大化总 MLL，
+        """用所有专家的数据（每个专家取最近 window_size 个样本）联合最大化总 MLL，
         训练一组“共享”log 超参，并回填到 self.global_params，然后重建所有专家。
         """
         # 若还没初始化共享超参，先按默认初始化一份

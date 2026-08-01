@@ -1,19 +1,25 @@
-import numpy as np
 from pathlib import Path
-from matplotlib.backend_bases import MouseEvent, KeyEvent
 
-from geometry.demos import (load_demo_spirals, load_demo_circles_with_orientation, 
-                            load_ref_from_csv, load_probe_from_csv
+import numpy as np
+from matplotlib.backend_bases import KeyEvent, MouseEvent
+
+from geometry.demos import (
+    load_demo_circles_with_orientation,
+    load_demo_spirals,
+    load_probe_from_csv,
+    load_ref_from_csv,
 )
-from utils.misc import (process_csv, save_reference_raw_to_csv, 
-                        save_probe_raw_to_csv, save_predictions_to_csv,
-                        save_similarity_transform_to_json)
+from utils.misc import (
+    process_csv,
+    save_predictions_to_csv,
+    save_probe_raw_to_csv,
+    save_reference_raw_to_csv,
+    save_similarity_transform_to_json,
+)
 
 
 def on_press(app6d, event: MouseEvent):
-    """
-    Handle mouse press events for drawing.
-    """
+    """Handle mouse press events for drawing."""
     if event.inaxes is None or event.xdata is None or event.ydata is None:
         return
 
@@ -41,9 +47,7 @@ def on_press(app6d, event: MouseEvent):
         print("[UI] Start drawing probe (YZ)...")
 
 def on_move(app6d, event: MouseEvent):
-    """
-    Handle mouse move events for drawing.
-    """
+    """Handle mouse move events for drawing."""
     if event.inaxes is None or event.xdata is None or event.ydata is None:
         return
 
@@ -56,9 +60,7 @@ def on_move(app6d, event: MouseEvent):
         app6d.update_probe_lines()
 
 def on_release(app6d, event: MouseEvent):
-    """
-    Handle mouse release events to finish drawing.
-    """
+    """Handle mouse release events to finish drawing."""
     # Finish reference
     if event.button == 1 and app6d.drawing_ref:
         app6d.drawing_ref = False
@@ -77,9 +79,7 @@ def on_release(app6d, event: MouseEvent):
             app6d.process_probe_and_predict()
 
 def on_key(app6d, event: KeyEvent):
-    """
-    Handle key press events.
-    """
+    """Handle key press events."""
     key = event.key
 
     if key == "c":
@@ -233,13 +233,9 @@ def on_key(app6d, event: KeyEvent):
         print()
 
 def xy_to_xyz(app6d, event: MouseEvent):
-    """
-    Convert XY plane event to XYZ coordinate (z=0).
-    """
+    """Convert XY plane event to XYZ coordinate (z=0)."""
     return np.array([float(event.xdata), float(event.ydata), 0.0], dtype=np.float64)
 
 def yz_to_xyz(app6d, event: MouseEvent):
-    """
-    Convert YZ plane event to XYZ coordinate (x=probe_plane_x).
-    """
+    """Convert YZ plane event to XYZ coordinate (x=probe_plane_x)."""
     return np.array([app6d.probe_plane_x, float(event.xdata), float(event.ydata)], dtype=np.float64)

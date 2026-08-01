@@ -10,8 +10,7 @@ def resample_trajectory_3d_equal_dt(
     speed: float,
     eps: float = 1e-9,
 ) -> np.ndarray:
-    """
-    Resample a 3D trajectory to equal time intervals assuming constant speed.
+    """Resample a 3D trajectory to equal time intervals assuming constant speed.
 
     Args:
         points_xyz: (N, 3) array of 3D points
@@ -74,8 +73,7 @@ def resample_trajectory_6d_equal_dt(
     points_force: np.ndarray | None = None,
     eps: float = 1e-9,
 ) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Resample a 6D trajectory (position + orientation) to equal time intervals.
+    """Resample a 6D trajectory (position + orientation) to equal time intervals.
 
     Position is resampled along arc-length assuming constant speed.
     Orientation is interpolated using quaternion SLERP.
@@ -175,8 +173,7 @@ def resample_trajectory_6d_equal_dt(
     return pos_eq, quat_eq, np.asarray(force_out, dtype=np.float64)
 
 def resample_by_arclen_fraction(P: np.ndarray, M: int, eps: float = 1e-9) -> np.ndarray:
-    """
-    Resample polyline P (N,3) into M points uniformly in arclength fraction [0,1].
+    """Resample polyline P (N,3) into M points uniformly in arclength fraction [0,1].
 
     Args:
         P: (N,3) array of 3D points

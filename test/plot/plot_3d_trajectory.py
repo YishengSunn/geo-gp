@@ -1,7 +1,7 @@
 """Plot a 3D trajectory schematic with windowed input and frame annotations."""
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 W = 20  # Number of past points ending at p(t).

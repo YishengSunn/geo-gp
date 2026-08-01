@@ -1,7 +1,7 @@
 """Plot a synthetic chunk-wise rollout validation example."""
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 # Generate a simple circular reference trajectory.
 t = np.linspace(0, 2 * np.pi, 200)

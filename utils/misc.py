@@ -1,13 +1,19 @@
 import csv
 import json
-import torch
+
 import numpy as np
 import pandas as pd
+import torch
 from matplotlib import pyplot as plt
 
 from utils.quaternion import (
-    rotmat_to_quat, quat_mul, quat_inv, quat_normalize,
-    quat_log, quat_exp, quat_slerp
+    quat_exp,
+    quat_inv,
+    quat_log,
+    quat_mul,
+    quat_normalize,
+    quat_slerp,
+    rotmat_to_quat,
 )
 
 
@@ -17,8 +23,7 @@ from utils.quaternion import (
 
 class Standardizer:
     def fit(self, X: torch.Tensor, Y: torch.Tensor) -> "Standardizer":
-        """
-        Fit standardizer to data
+        """Fit standardizer to data
 
         Args:
             X: input data, torch.Tensor of shape (N, D_in)
@@ -39,8 +44,7 @@ class Standardizer:
     def y_transform(self, Y: torch.Tensor) -> torch.Tensor: return (Y - self.Y_mean) / self.Y_std
 
     def y_inverse_transform(self, Yn: torch.Tensor) -> torch.Tensor:
-        """
-        Inverse transform standardized output
+        """Inverse transform standardized output
 
         Args:
             Yn: standardized output, torch.Tensor of shape (..., D_out)
@@ -60,8 +64,7 @@ class Standardizer:
 # ============================================================
 
 def torch_to_np(x: torch.Tensor) -> np.ndarray:
-    """
-    Convert torch tensor to numpy array
+    """Convert torch tensor to numpy array
     
     Args:
         x: torch.Tensor
@@ -76,8 +79,7 @@ def torch_to_np(x: torch.Tensor) -> np.ndarray:
 # ============================================================
 
 def moving_average_centered_pos(arr: np.ndarray, win: int) -> np.ndarray:
-    """
-    Centered moving average smoothing along time axis (axis=0).
+    """Centered moving average smoothing along time axis (axis=0).
 
     Args:
         arr: (N, d) np.ndarray
@@ -111,8 +113,7 @@ def moving_average_centered_pos(arr: np.ndarray, win: int) -> np.ndarray:
     return out
 
 def moving_average_centered_orient(arr: np.ndarray, win: int) -> np.ndarray:
-    """
-    Centered moving average smoothing along time axis (axis=0).
+    """Centered moving average smoothing along time axis (axis=0).
 
     Args:
         arr: (N, d) np.ndarray
@@ -149,8 +150,7 @@ def moving_average_centered_orient(arr: np.ndarray, win: int) -> np.ndarray:
     return out
 
 def moving_average_centered_6d(arr: np.ndarray, win: int) -> np.ndarray:
-    """
-    Centered moving average smoothing along time axis (axis=0).
+    """Centered moving average smoothing along time axis (axis=0).
 
     Supports:
     - (N, d) Euclidean features (position, spherical, etc.)
@@ -191,8 +191,7 @@ def smooth_prediction_by_velocity(
     win: int = 9,
     blend_first_step: float = 0.8,
 ) -> np.ndarray:
-    """
-    Smooth predicted trajectory by smoothing per-step velocity (delta) in world/probe frame.
+    """Smooth predicted trajectory by smoothing per-step velocity (delta) in world/probe frame.
 
     This keeps the first predicted point continuous w.r.t. the last probe point, and blends the
     first velocity to preserve the probe's exiting direction.
@@ -250,8 +249,7 @@ def smooth_prediction_by_twist_6d(
     blend_first_step_rot: float = 0.8,
     eps: float = 1e-12,
 ):
-    """
-    Smooth 6D predicted trajectory by smoothing per-step twist in WORLD/PROBE frame, using quaternions for rotation:
+    """Smooth 6D predicted trajectory by smoothing per-step twist in WORLD/PROBE frame, using quaternions for rotation:
         - translation part: smooth Δp (world-frame)
         - rotation part: smooth ω where Exp(ω) = quat_inv(q_{t}) * q_{t+1}  (body-frame incremental rotation)
     
@@ -359,8 +357,7 @@ def process_csv(
     static_ang_eps_deg: float = 1.2,
     static_min_run: int = 8,
 ):
-    """
-    Process raw CSV file by adding time column and downsampling.
+    """Process raw CSV file by adding time column and downsampling.
 
     Args:
         input_path: str, path to raw CSV file with columns [time, x, y, z, qx, qy, qz, qw]
@@ -446,8 +443,7 @@ def save_reference_raw_to_csv(
     *,
     dt: float = 0.05,
 ):
-    """
-    Save raw reference trajectory (position + quaternion) to CSV.
+    """Save raw reference trajectory (position + quaternion) to CSV.
 
     Args:
         filepath: str, output CSV file path
@@ -504,8 +500,7 @@ def save_probe_raw_to_csv(
     *,
     dt: float = 0.05,
 ):
-    """
-    Save raw probe trajectory (position + quaternion) to CSV.
+    """Save raw probe trajectory (position + quaternion) to CSV.
 
     Args:
         filepath: str, output CSV file path
@@ -562,8 +557,7 @@ def save_predictions_to_csv(
     *,
     dt: float = 0.005,
 ):
-    """
-    Save GP predicted trajectory (position + quaternion) to CSV.
+    """Save GP predicted trajectory (position + quaternion) to CSV.
 
     Args:
         filepath: str, output CSV file path
@@ -665,8 +659,7 @@ def save_similarity_transform_to_json(
 # ============================================================
 
 def piecewise_quat_slerp_path(ref_seg: np.ndarray, t_samples: np.ndarray) -> np.ndarray:
-    """
-    Piecewise SLERP along ref_seg keyframes in [w,x,y,z], parameter t in [0,1]
+    """Piecewise SLERP along ref_seg keyframes in [w,x,y,z], parameter t in [0,1]
     from first to last quaternion.
 
     Args:
@@ -706,8 +699,7 @@ def plot_orientation_error(
     start_idx: int,
     R_ref_probe: np.ndarray,
 ) -> np.ndarray:
-    """
-    Plot orientation error trend between reference and predicted quaternions, 
+    """Plot orientation error trend between reference and predicted quaternions,
     after SLERP alignment and removing initial offset.
 
     Args:

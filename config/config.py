@@ -1,5 +1,7 @@
-import yaml
 from pathlib import Path
+
+import yaml
+
 
 class Config:
     def __init__(self, path: str | Path):

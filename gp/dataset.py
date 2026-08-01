@@ -1,7 +1,10 @@
 import torch
 
-from geometry.features import spherical_feat_from_xyz_torch, direction_feat_from_xyz_torch
-from utils.quaternion import quat_mul, quat_inv
+from geometry.features import (
+    direction_feat_from_xyz_torch,
+    spherical_feat_from_xyz_torch,
+)
+from utils.quaternion import quat_inv, quat_mul
 
 
 def build_dataset_3d(
@@ -10,8 +13,7 @@ def build_dataset_3d(
     input_type: str = 'delta',
     output_type: str = 'delta',
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Build 3D dataset from trajectory with specified input and output types.
+    """Build 3D dataset from trajectory with specified input and output types.
 
     Args:
         traj: torch tensor of shape (T, 3)
@@ -83,8 +85,7 @@ def build_dataset_6d(
     output_type: str = 'delta',
     traj_force: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Build 6D dataset from trajectory with specified input and output types.
+    """Build 6D dataset from trajectory with specified input and output types.
     
     Args:
         traj_pos: torch tensor of shape (T, 3)
@@ -179,8 +180,7 @@ def time_split(
     Y: torch.Tensor,
     train_ratio: float,
 ) -> tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor], int]:
-    """
-    Split dataset into training and test sets based on time.
+    """Split dataset into training and test sets based on time.
 
     Args:
         X: input data, numpy array of shape (N, D_in)

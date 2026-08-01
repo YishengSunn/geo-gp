@@ -1,32 +1,47 @@
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
 from time import perf_counter
 
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+
 from config.runtime import (
-    SAMPLE_HZ, DEFAULT_SPEED, TRAIN_RATIO, K_HIST, METHOD_ID,
-    ROLLOUT_HORIZON, MSE_THRESH, GOAL_STOP_EPS, MAX_START_JUMP, DROP_K, MAX_RETRIES
+    DEFAULT_SPEED,
+    DROP_K,
+    GOAL_STOP_EPS,
+    K_HIST,
+    MAX_RETRIES,
+    MAX_START_JUMP,
+    METHOD_ID,
+    MSE_THRESH,
+    ROLLOUT_HORIZON,
+    SAMPLE_HZ,
+    TRAIN_RATIO,
 )
 from geometry.demos import make_probe_force_raw, make_ref_force_raw
 from geometry.frame6d import estimate_rotation_scale_3d_search_by_count
 from geometry.metrics import geom_mse
-from geometry.resample import resample_trajectory_3d_equal_dt, resample_trajectory_6d_equal_dt
+from geometry.resample import (
+    resample_trajectory_3d_equal_dt,
+    resample_trajectory_6d_equal_dt,
+)
 from gp.dataset import build_dataset_3d, build_dataset_6d, time_split
-from gp.model import train_gp, rollout_reference_3d, rollout_reference_6d
+from gp.model import rollout_reference_3d, rollout_reference_6d, train_gp
 from skills.skill_library import SkillLibrary
 from skills.skill_loader import load_skills_from_models
-from ui.handlers6d import on_press, on_move, on_release, on_key
+from ui.handlers6d import on_key, on_move, on_press, on_release
 from utils.misc import (
-    moving_average_centered_pos, moving_average_centered_6d, 
-    smooth_prediction_by_velocity, smooth_prediction_by_twist_6d, plot_orientation_error
+    moving_average_centered_6d,
+    moving_average_centered_pos,
+    plot_orientation_error,
+    smooth_prediction_by_twist_6d,
+    smooth_prediction_by_velocity,
 )
 from utils.quaternion import quat_to_rotmat
 
 
 class DrawApp6D:
     def __init__(self, *, probe_plane_x: float = 2.0):
-        """
-        A simple UI for drawing 3D trajectories and predicting with GP.
+        """A simple UI for drawing 3D trajectories and predicting with GP.
 
         Args:
             probe_plane_x: float, x-coordinate of the probe drawing plane
@@ -144,8 +159,7 @@ class DrawApp6D:
         input_type: str = "spherical",
         output_type: str = "delta",
     ):
-        """
-        Train a GP model for the reference trajectory.
+        """Train a GP model for the reference trajectory.
 
         Args:
             k: int, number of past time steps to use as input
@@ -192,8 +206,7 @@ class DrawApp6D:
         input_type: str = "spherical",
         output_type: str = "delta",
     ):
-        """
-        Train a GP model for the reference trajectory with 6D input and output.
+        """Train a GP model for the reference trajectory with 6D input and output.
 
         Args:
             k: int, number of past time steps to use as input
@@ -272,8 +285,7 @@ class DrawApp6D:
         input_type="spherical",
         output_type="delta",
     ):
-        """
-        Process the drawn probe trajectory and perform prediction.
+        """Process the drawn probe trajectory and perform prediction.
 
         Args:
             k: int, history length for GP input
@@ -439,8 +451,7 @@ class DrawApp6D:
         input_type="spherical",
         output_type="delta",
     ):
-        """
-        Process the drawn probe trajectory with orientations and perform 6D prediction.
+        """Process the drawn probe trajectory with orientations and perform 6D prediction.
 
         Args:
             k: int, history length for GP input
@@ -648,9 +659,7 @@ class DrawApp6D:
         print()
 
     def update_ref_lines(self):
-        """
-        Update reference trajectory lines in all views.
-        """
+        """Update reference trajectory lines in all views."""
         if len(self.ref_raw) == 0:
             for q in self.orient_quivers_ref:
                 q.remove()
@@ -683,9 +692,7 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
     def update_probe_lines(self):
-        """
-        Update probe trajectory lines in all views.
-        """
+        """Update probe trajectory lines in all views."""
         if len(self.probe_raw) == 0:
             for q in self.orient_quivers_probe:
                 q.remove()
@@ -718,9 +725,7 @@ class DrawApp6D:
         self.fig.canvas.draw_idle()
 
     def update_pred_lines(self):
-        """
-        Update prediction trajectory lines in all views.
-        """
+        """Update prediction trajectory lines in all views."""
         if self.preds is None or len(self.preds) == 0:
             for q in self.orient_quivers_pred:
                 q.remove()
@@ -759,8 +764,7 @@ class DrawApp6D:
         quiver_store: list,
         scale: float = 0.02,
     ):
-        """
-        Draw orientation arrows in 3D using quaternions.
+        """Draw orientation arrows in 3D using quaternions.
 
         Args:
             positions: np.ndarray of shape (N,3), positions of the quivers
@@ -812,8 +816,7 @@ class DrawApp6D:
             quiver_store.append(qz)
 
     def autoscale_3d(self, margin: float = 0.05):
-        """
-        Keep 3D view in true equal scale based on all currently available points.
+        """Keep 3D view in true equal scale based on all currently available points.
 
         Args:
             margin: float, margin ratio to add around the points
