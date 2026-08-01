@@ -1,10 +1,10 @@
 from skills.skill_loader import load_skills_from_folder
 
 
-SAVE_DIR = "data/04-21/models/6d"
-DATA_DIR = "data/04-21/refs/processed"
+SAVE_DIR = "data/07-30/models/3d"
+DATA_DIR = "data/07-30/refs/processed"
 
-skills = load_skills_from_folder(DATA_DIR, mode="6d")
+skills = load_skills_from_folder(DATA_DIR, mode="3d")
 
 for s in skills:
     print(f"Training {s.name}...")
