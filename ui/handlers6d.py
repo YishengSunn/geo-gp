@@ -1,18 +1,25 @@
-import numpy as np
 from pathlib import Path
-from matplotlib.backend_bases import MouseEvent, KeyEvent
 
-from geometry.demos import (load_demo_spirals, load_demo_circles_with_orientation, 
-                            load_ref_from_csv, load_probe_from_csv
+import numpy as np
+from matplotlib.backend_bases import KeyEvent, MouseEvent
+
+from geometry.demos import (
+    load_demo_circles_with_orientation,
+    load_demo_spirals,
+    load_probe_from_csv,
+    load_ref_from_csv,
 )
-from utils.misc import (process_csv, save_reference_raw_to_csv, 
-                        save_probe_raw_to_csv, save_predictions_to_csv)
+from utils.misc import (
+    process_csv,
+    save_predictions_to_csv,
+    save_probe_raw_to_csv,
+    save_reference_raw_to_csv,
+    save_similarity_transform_to_json,
+)
 
 
 def on_press(app6d, event: MouseEvent):
-    """
-    Handle mouse press events for drawing.
-    """
+    """Handle mouse press events for drawing."""
     if event.inaxes is None or event.xdata is None or event.ydata is None:
         return
 
@@ -40,9 +47,7 @@ def on_press(app6d, event: MouseEvent):
         print("[UI] Start drawing probe (YZ)...")
 
 def on_move(app6d, event: MouseEvent):
-    """
-    Handle mouse move events for drawing.
-    """
+    """Handle mouse move events for drawing."""
     if event.inaxes is None or event.xdata is None or event.ydata is None:
         return
 
@@ -55,9 +60,7 @@ def on_move(app6d, event: MouseEvent):
         app6d.update_probe_lines()
 
 def on_release(app6d, event: MouseEvent):
-    """
-    Handle mouse release events to finish drawing.
-    """
+    """Handle mouse release events to finish drawing."""
     # Finish reference
     if event.button == 1 and app6d.drawing_ref:
         app6d.drawing_ref = False
@@ -76,9 +79,7 @@ def on_release(app6d, event: MouseEvent):
             app6d.process_probe_and_predict()
 
 def on_key(app6d, event: KeyEvent):
-    """
-    Handle key press events.
-    """
+    """Handle key press events."""
     key = event.key
 
     if key == "c":
@@ -129,7 +130,7 @@ def on_key(app6d, event: KeyEvent):
         load_ref_from_csv(app6d, "data/06-02/refs/processed/arc_1.csv")
 
     elif key == "P":
-        load_probe_from_csv(app6d, "data/06-02/refs/processed/arc_1.csv")
+        load_probe_from_csv(app6d, "data/06-02/preds/arc/arc_1/prompt_success_2026-06-09_11-35-51.csv")
 
     elif key == "t":
         if app6d.use_6d:
@@ -145,7 +146,7 @@ def on_key(app6d, event: KeyEvent):
 
     elif key == "s":
         if app6d.ref_raw is not None and len(app6d.ref_raw) > 0:
-            file_path = Path("data/07-30/refs/raw/arc_1.csv")
+            file_path = Path("data/07-30/refs/processed/arc_1.csv")
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
             save_reference_raw_to_csv(
@@ -166,7 +167,7 @@ def on_key(app6d, event: KeyEvent):
                 dt=0.005,
             )
 
-        if app6d.preds is not None and app6d.preds_quat is not None:
+        if app6d.preds is not None and len(app6d.preds) > 0:
             file_path = Path("data/07-30/preds/arc/arc_1/prediction.csv")
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -177,9 +178,30 @@ def on_key(app6d, event: KeyEvent):
                 dt=0.005,
             )
 
+        if (
+            app6d.R is not None
+            and app6d.s is not None
+            and app6d.t is not None
+            and app6d.skill_name is not None
+            and app6d.match_ms is not None
+            and app6d.j_end is not None
+        ):
+            file_path = Path("data/07-30/preds/arc/arc_1/similarity_transform.json")
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            save_similarity_transform_to_json(
+                str(file_path),
+                app6d.R,
+                app6d.s,
+                app6d.t,
+                skill_name=app6d.skill_name,
+                match_ms=app6d.match_ms,
+                j_end=app6d.j_end,
+            )
+
     elif key == ' ':
-        raw_root = Path("data/05-08/refs/raw")
-        processed_root = Path("data/05-08/refs/processed")
+        raw_root = Path("data/06-02/refs/raw")
+        processed_root = Path("data/06-02/refs/processed")
         csv_files = sorted(raw_root.rglob("*.csv"))
 
         if not csv_files:
@@ -211,13 +233,9 @@ def on_key(app6d, event: KeyEvent):
         print()
 
 def xy_to_xyz(app6d, event: MouseEvent):
-    """
-    Convert XY plane event to XYZ coordinate (z=0).
-    """
+    """Convert XY plane event to XYZ coordinate (z=0)."""
     return np.array([float(event.xdata), float(event.ydata), 0.0], dtype=np.float64)
 
 def yz_to_xyz(app6d, event: MouseEvent):
-    """
-    Convert YZ plane event to XYZ coordinate (x=probe_plane_x).
-    """
+    """Convert YZ plane event to XYZ coordinate (x=probe_plane_x)."""
     return np.array([app6d.probe_plane_x, float(event.xdata), float(event.ydata)], dtype=np.float64)

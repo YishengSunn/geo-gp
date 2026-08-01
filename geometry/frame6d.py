@@ -9,8 +9,7 @@ def estimate_rotation_scale_3d(
     *,
     eps: float = 1e-12,
 ) -> tuple[np.ndarray, float, np.ndarray, float]:
-    """
-    Estimate similarity transform (rotation R, isotropic scale s, translation t)
+    """Estimate similarity transform (rotation R, isotropic scale s, translation t)
     that best aligns ref_pts -> probe_pts in least-squares sense.
 
     Finds R in SO(3), s > 0, t in R^3 minimizing:
@@ -78,8 +77,7 @@ def estimate_rotation_scale_3d_search_by_count(
     margin_pts: int = 20,
     step: int = 1,
 ) -> tuple[np.ndarray, float, np.ndarray, int, float]:
-    """
-    Estimate similarity transform (R,s,t) aligning ref_eq -> probe_eq
+    """Estimate similarity transform (R,s,t) aligning ref_eq -> probe_eq
     by searching over possible segment lengths in ref_eq.
     Search best ref prefix length around probe length (with scale range prior).
 

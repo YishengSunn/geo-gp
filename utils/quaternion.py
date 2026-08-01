@@ -1,10 +1,9 @@
-import torch
 import numpy as np
+import torch
 
 
 def quat_between_vectors(a, b):
-    """
-    Compute the quaternion that rotates vector a to vector b.
+    """Compute the quaternion that rotates vector a to vector b.
     
     Args:
         a: (3,) source vector
@@ -36,8 +35,7 @@ def quat_between_vectors(a, b):
     return q
 
 def quat_to_rotmat(q):
-    """
-    Convert quaternion to rotation matrix.
+    """Convert quaternion to rotation matrix.
 
     Args:
         q: (4,) quaternion [w, x, y, z]
@@ -56,8 +54,7 @@ def quat_to_rotmat(q):
     return R
 
 def rotmat_to_quat(R):
-    """
-    Convert rotation matrix to quaternion.
+    """Convert rotation matrix to quaternion.
 
     Args:
         R: (3,3) rotation matrix
@@ -99,8 +96,7 @@ def rotmat_to_quat(R):
     return q / np.linalg.norm(q)
 
 def quat_mul(q1, q2):
-    """
-    Multiply two quaternions.
+    """Multiply two quaternions.
 
     Args:
         q1: (4,) quaternion [w, x, y, z]
@@ -134,8 +130,7 @@ def quat_mul(q1, q2):
         ], dtype=q1.dtype)
 
 def quat_inv(q):
-    """
-    Invert a quaternion.
+    """Invert a quaternion.
 
     Args:
         q: (4,) quaternion [w, x, y, z]
@@ -154,8 +149,7 @@ def quat_inv(q):
         return np.array([w, -x, -y, -z], dtype=q.dtype)
 
 def quat_normalize(q):
-    """
-    Normalize a quaternion to unit length.
+    """Normalize a quaternion to unit length.
 
     Args:
         q: (4,) quaternion [w, x, y, z]
@@ -172,8 +166,7 @@ def quat_normalize(q):
         return q / np.linalg.norm(q)
 
 def quat_log(q, eps=1e-9):
-    """
-    Logarithm map of a quaternion to its tangent space.
+    """Logarithm map of a quaternion to its tangent space.
 
     Args:
         q: (4,) quaternion [w, x, y, z]
@@ -213,8 +206,7 @@ def quat_log(q, eps=1e-9):
         return axis * theta
 
 def quat_exp(omega, eps=1e-9):
-    """
-    Exponential map of a tangent vector to a quaternion.
+    """Exponential map of a tangent vector to a quaternion.
     
     Args:
         omega: (3,) tangent vector representing the rotation
@@ -254,8 +246,7 @@ def quat_exp(omega, eps=1e-9):
         return np.array([w, xyz[0], xyz[1], xyz[2]])
 
 def quat_slerp(q0, q1, t, eps=1e-9):
-    """
-    Spherical linear interpolation between two quaternions.
+    """Spherical linear interpolation between two quaternions.
 
     Args:
         q0: (4,) start quaternion [w, x, y, z]

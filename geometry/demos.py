@@ -1,12 +1,12 @@
 import csv
+
 import numpy as np
 
 from utils.quaternion import quat_between_vectors, rotmat_to_quat
 
 
 def make_ref_force_raw(n: int) -> np.ndarray:
-    """
-    Build a (N,3) force along global -z (down).
+    """Build a (N,3) force along global -z (down).
 
     Args:
         n: int, number of points
@@ -22,8 +22,7 @@ def make_ref_force_raw(n: int) -> np.ndarray:
     return f
 
 def make_probe_force_raw(n: int) -> np.ndarray:
-    """
-    Build a (N,3) force along +x, magnitude linear from 0 to 1 along the sequence.
+    """Build a (N,3) force along +x, magnitude linear from 0 to 1 along the sequence.
 
     Args:
         n: int, number of points
@@ -39,8 +38,7 @@ def make_probe_force_raw(n: int) -> np.ndarray:
     return f
 
 def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
-    """
-    Load a demo pair of 3D spirals into ref_raw and probe_raw.
+    """Load a demo pair of 3D spirals into ref_raw and probe_raw.
 
     - Reference: vertical helix around z-axis.
     - Probe: horizontal helix that lies on the drawing plane x=probe_plane_x (roughly),
@@ -76,8 +74,7 @@ def load_demo_spirals(app6d, *, T=400, turns=4*np.pi, radius=1.0, speed=0.1):
     print()
 
 def load_demo_circles_with_orientation(app6d, *, T=400, r_ref=0.5, r_probe=1.0):
-    """
-    Load a demo pair of circles with orientation into ref_raw/probe_raw and ref_quat_raw/probe_quat_raw.
+    """Load a demo pair of circles with orientation into ref_raw/probe_raw and ref_quat_raw/probe_quat_raw.
 
     - Reference: circle in the xy-plane, centered at origin, with radius r_ref.
     - Probe: circle in the yz-plane, centered at (probe_plane_x, 0, 0), with radius r_probe.
@@ -139,8 +136,7 @@ def load_demo_circles_with_orientation(app6d, *, T=400, r_ref=0.5, r_probe=1.0):
     print()
 
 def load_pose_force_from_csv(filepath):
-    """
-    Load position, quaternion, and optionally force from a CSV file.
+    """Load position, quaternion, and optionally force from a CSV file.
     The CSV file should have the following columns: time,x,y,z,qx,qy,qz,qw
     If fx,fy,fz columns are present, they will be loaded as well.
     The quaternion will be converted to [w, x, y, z] format.
@@ -191,8 +187,7 @@ def load_pose_force_from_csv(filepath):
     return pts, np.asarray(quats, dtype=np.float64), force_arr
 
 def load_ref_from_csv(app6d, filepath):
-    """
-    Load position and quaternion from CSV with fields:
+    """Load position and quaternion from CSV with fields:
     time,x,y,z,qx,qy,qz,qw
 
     If fx,fy,fz columns are present, load force as well.
@@ -220,8 +215,7 @@ def load_ref_from_csv(app6d, filepath):
     print()
 
 def load_probe_from_csv(app6d, filepath):
-    """
-    Load position and quaternion from CSV with fields:
+    """Load position and quaternion from CSV with fields:
     time,x,y,z,qx,qy,qz,qw
 
     If fx,fy,fz columns are present, load force as well.

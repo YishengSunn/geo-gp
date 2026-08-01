@@ -1,22 +1,29 @@
-import torch
 import numpy as np
+import torch
 
-from config.runtime import ( 
-    NEAREST_K, MAX_EXPERTS, MAX_DATA_PER_EXPERT, MIN_POINTS_OFFLINE, WINDOW_SIZE,
-    METHOD_ID, METHOD_HPARAM
+from config.runtime import (
+    MAX_DATA_PER_EXPERT,
+    MAX_EXPERTS,
+    METHOD_HPARAM,
+    METHOD_ID,
+    MIN_POINTS_OFFLINE,
+    NEAREST_K,
+    WINDOW_SIZE,
 )
-from geometry.features import spherical_feat_from_xyz_torch, direction_feat_from_xyz_torch
+from geometry.features import (
+    direction_feat_from_xyz_torch,
+    spherical_feat_from_xyz_torch,
+)
 from gp.skygp_moe import SkyGP_MOE
-from utils.quaternion import rotmat_to_quat, quat_mul, quat_inv, quat_normalize
-from utils.misc import torch_to_np, Standardizer
+from utils.misc import Standardizer, torch_to_np
+from utils.quaternion import quat_inv, quat_mul, quat_normalize, rotmat_to_quat
 
 
 def train_gp(
     dataset: dict[str, torch.Tensor],
     method_id: int = METHOD_ID,
 ) -> dict[str, object]:
-    """
-    Train GP model on the dataset.
+    """Train GP model on the dataset.
 
     Args:
         dataset: dict with 'X_train' and 'Y_train' as torch tensors
@@ -75,8 +82,7 @@ def gp_predict(
     info: dict[str, object],
     feat_1xD: torch.Tensor,
 ) -> tuple[np.ndarray, float]:
-    """
-    GP prediction for a single input feature vector.
+    """GP prediction for a single input feature vector.
 
     Args:
         info: dict with 'gp_model' and 'scaler'
@@ -105,8 +111,7 @@ def rollout_reference_3d(
     input_type: str = 'delta',
     output_type: str = 'delta',
 ) -> tuple[torch.Tensor, torch.Tensor, int, np.ndarray]:
-    """
-    3D rollout trajectory using GP model from a given start time for h steps.
+    """3D rollout trajectory using GP model from a given start time for h steps.
 
     Args:
         model_info: dict with 'gp_model' and 'scaler'
@@ -209,8 +214,7 @@ def rollout_reference_6d(
     R_ref_probe: np.ndarray | None = None,
     traj_force: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor, torch.Tensor, torch.Tensor | None, np.ndarray]:
-    """
-    6D rollout trajectory (position + orientation, and optionally force) 
+    """6D rollout trajectory (position + orientation, and optionally force)
     using GP model from a given start time for h steps.
 
     Args:

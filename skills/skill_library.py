@@ -5,8 +5,7 @@ from skills.skill import Skill
 
 
 class SkillLibrary:
-    """
-    A library of manipulation skills.
+    """A library of manipulation skills.
 
     The library can:
         - store multiple skills
@@ -19,8 +18,7 @@ class SkillLibrary:
 
     # Add skill
     def add_skill(self, skill: Skill):
-        """
-        Add a skill to the library.
+        """Add a skill to the library.
         
         Args:
             skill: skill object to add
@@ -35,8 +33,7 @@ class SkillLibrary:
         input_type: str = "spherical",
         output_type: str = "delta",
     ):
-        """
-        Train GP models for all skills in the library.
+        """Train GP models for all skills in the library.
         
         Args:
             k: int, number of past time steps to use as input for GP training
@@ -60,8 +57,7 @@ class SkillLibrary:
         margin_pts: int = 300,
         step: int = 10,
     ) -> tuple[Skill, tuple[np.ndarray, float, float, float, int]]:
-        """
-        Match a probe trajectory to the best skill in the library.
+        """Match a probe trajectory to the best skill in the library.
 
         Args:
             probe_eq: (N,7) probe trajectory in 6D (pos+quat)

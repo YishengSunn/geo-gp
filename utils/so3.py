@@ -1,10 +1,9 @@
-import torch
 import numpy as np
+import torch
 
 
 def is_torch(x):
-    """
-    Check if x is a torch.Tensor.
+    """Check if x is a torch.Tensor.
     
     Args:
         x: input object
@@ -14,8 +13,7 @@ def is_torch(x):
     return isinstance(x, torch.Tensor)
 
 def eye3_like(x):
-    """
-    Create a 3x3 identity matrix with the same type (torch or numpy) as x.
+    """Create a 3x3 identity matrix with the same type (torch or numpy) as x.
 
     Args:
         x: input object (torch.Tensor or np.ndarray)
@@ -29,8 +27,7 @@ def eye3_like(x):
         return np.eye(3, dtype=x.dtype)
 
 def so3_log(R, eps: float = 1e-8):
-    """
-    Log map from SO(3) -> so(3).
+    """Log map from SO(3) -> so(3).
     Supports both torch.Tensor and np.ndarray.
     Output type matches input type.
 
@@ -76,8 +73,7 @@ def so3_log(R, eps: float = 1e-8):
         return theta * omega
 
 def so3_exp(omega, eps: float = 1e-8):
-    """
-    Exponential map from so(3) -> SO(3).
+    """Exponential map from so(3) -> SO(3).
     Supports both torch.Tensor and np.ndarray.
     Output type matches input type.
 

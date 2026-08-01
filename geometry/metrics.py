@@ -4,8 +4,7 @@ from geometry.resample import resample_by_arclen_fraction
 
 
 def geom_mse(hist: np.ndarray, ref: np.ndarray, M: int = 80) -> float:
-    """
-    Compute geometric MSE between two trajectories by resampling them to M points
+    """Compute geometric MSE between two trajectories by resampling them to M points
     equally spaced by arc-length fraction.
 
     Args:

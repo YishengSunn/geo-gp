@@ -1,4 +1,5 @@
 import os
+
 import numpy as np
 import pandas as pd
 
@@ -7,8 +8,7 @@ from skills.skill import Skill
 
 # Load one skill from CSV
 def load_skill_csv(path: str, mode: str = "6d") -> Skill:
-    """
-    Load a skill from a CSV file. The CSV is expected to have columns: x,y,z,qx,qy,qz,qw 
+    """Load a skill from a CSV file. The CSV is expected to have columns: x,y,z,qx,qy,qz,qw
     where (x,y,z) are positions and (qx,qy,qz,qw) are quaternions (in [x,y,z,w] format).
 
     Args:
@@ -47,8 +47,7 @@ def load_skill_csv(path: str, mode: str = "6d") -> Skill:
 
 # Load all CSV skills
 def load_skills_from_folder(folder: str, mode: str = "6d") -> list[Skill]:
-    """
-    Load all skill CSV files from a folder. Each CSV file should represent one skill.
+    """Load all skill CSV files from a folder. Each CSV file should represent one skill.
 
     Args:
         folder: str, path to the folder containing skill CSV files
@@ -73,8 +72,7 @@ def load_skills_from_folder(folder: str, mode: str = "6d") -> list[Skill]:
     return skills
 
 def load_skills_from_models(folder: str, mode: str = "3d") -> list[Skill]:
-    """
-    Load all pretrained skill models from a folder. Each .pt file should represent one skill.
+    """Load all pretrained skill models from a folder. Each .pt file should represent one skill.
 
     Args:
         folder: str, path to the folder containing pretrained skill .pt files
@@ -110,8 +108,7 @@ def load_and_train_skills(
     input_type: str = "spherical",
     output_type: str = "delta",
 ):
-    """
-    Load all skills from a folder and train GP models for each skill.
+    """Load all skills from a folder and train GP models for each skill.
 
     Args:
         folder: str, path to the folder containing skill CSV files

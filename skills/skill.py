@@ -1,17 +1,20 @@
 import os
-import torch
-import numpy as np
 
-from config.runtime import SAMPLE_HZ, DEFAULT_SPEED, METHOD_ID
-from geometry.resample import resample_trajectory_3d_equal_dt, resample_trajectory_6d_equal_dt
+import numpy as np
+import torch
+
+from config.runtime import DEFAULT_SPEED, METHOD_ID, SAMPLE_HZ
+from geometry.resample import (
+    resample_trajectory_3d_equal_dt,
+    resample_trajectory_6d_equal_dt,
+)
 from gp.dataset import build_dataset_3d, build_dataset_6d, time_split
 from gp.model import train_gp
-from utils.misc import moving_average_centered_pos, moving_average_centered_6d
+from utils.misc import moving_average_centered_6d, moving_average_centered_pos
 
 
 class Skill:
-    """
-    A single manipulation skill.
+    """A single manipulation skill.
 
     Each skill contains:
         - reference trajectory
@@ -30,8 +33,7 @@ class Skill:
         smooth_win: int = 15,
     ):
 
-        """
-        Initialize a skill.
+        """Initialize a skill.
 
         Args:
             name: str, name of the skill
@@ -64,9 +66,7 @@ class Skill:
 
     # Prepare reference trajectory
     def prepare_reference(self):
-        """
-        Resample the reference trajectory to have equal time intervals, and optionally apply smoothing.
-        """
+        """Resample the reference trajectory to have equal time intervals, and optionally apply smoothing."""
 
         if self.mode == "6d":
             if self.ref_force_raw is not None:
@@ -111,8 +111,7 @@ class Skill:
         output_type: str = "delta",
         train_ratio: float = 1.0,
     ):
-        """
-        Train a GP model for this skill using the reference trajectory.
+        """Train a GP model for this skill using the reference trajectory.
 
         Args:
             k: int, number of past time steps to use as input
@@ -164,8 +163,7 @@ class Skill:
         print()
 
     def save(self, folder: str):
-        """
-        Save the skill to a file.
+        """Save the skill to a file.
 
         Args:
             folder: str, directory to save the skill file
@@ -183,8 +181,7 @@ class Skill:
         torch.save(payload, path)
 
     def load(self, path: str):
-        """
-        Load the skill from a file.
+        """Load the skill from a file.
 
         Args:
             path: str, path to the skill file

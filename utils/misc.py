@@ -1,12 +1,19 @@
 import csv
-import torch
+import json
+
 import numpy as np
 import pandas as pd
+import torch
 from matplotlib import pyplot as plt
 
 from utils.quaternion import (
-    rotmat_to_quat, quat_mul, quat_inv, quat_normalize,
-    quat_log, quat_exp, quat_slerp
+    quat_exp,
+    quat_inv,
+    quat_log,
+    quat_mul,
+    quat_normalize,
+    quat_slerp,
+    rotmat_to_quat,
 )
 
 
@@ -16,8 +23,7 @@ from utils.quaternion import (
 
 class Standardizer:
     def fit(self, X: torch.Tensor, Y: torch.Tensor) -> "Standardizer":
-        """
-        Fit standardizer to data
+        """Fit standardizer to data
 
         Args:
             X: input data, torch.Tensor of shape (N, D_in)
@@ -38,8 +44,7 @@ class Standardizer:
     def y_transform(self, Y: torch.Tensor) -> torch.Tensor: return (Y - self.Y_mean) / self.Y_std
 
     def y_inverse_transform(self, Yn: torch.Tensor) -> torch.Tensor:
-        """
-        Inverse transform standardized output
+        """Inverse transform standardized output
 
         Args:
             Yn: standardized output, torch.Tensor of shape (..., D_out)
@@ -59,8 +64,7 @@ class Standardizer:
 # ============================================================
 
 def torch_to_np(x: torch.Tensor) -> np.ndarray:
-    """
-    Convert torch tensor to numpy array
+    """Convert torch tensor to numpy array
     
     Args:
         x: torch.Tensor
@@ -75,8 +79,7 @@ def torch_to_np(x: torch.Tensor) -> np.ndarray:
 # ============================================================
 
 def moving_average_centered_pos(arr: np.ndarray, win: int) -> np.ndarray:
-    """
-    Centered moving average smoothing along time axis (axis=0).
+    """Centered moving average smoothing along time axis (axis=0).
 
     Args:
         arr: (N, d) np.ndarray
@@ -110,8 +113,7 @@ def moving_average_centered_pos(arr: np.ndarray, win: int) -> np.ndarray:
     return out
 
 def moving_average_centered_orient(arr: np.ndarray, win: int) -> np.ndarray:
-    """
-    Centered moving average smoothing along time axis (axis=0).
+    """Centered moving average smoothing along time axis (axis=0).
 
     Args:
         arr: (N, d) np.ndarray
@@ -148,8 +150,7 @@ def moving_average_centered_orient(arr: np.ndarray, win: int) -> np.ndarray:
     return out
 
 def moving_average_centered_6d(arr: np.ndarray, win: int) -> np.ndarray:
-    """
-    Centered moving average smoothing along time axis (axis=0).
+    """Centered moving average smoothing along time axis (axis=0).
 
     Supports:
     - (N, d) Euclidean features (position, spherical, etc.)
@@ -190,8 +191,7 @@ def smooth_prediction_by_velocity(
     win: int = 9,
     blend_first_step: float = 0.8,
 ) -> np.ndarray:
-    """
-    Smooth predicted trajectory by smoothing per-step velocity (delta) in world/probe frame.
+    """Smooth predicted trajectory by smoothing per-step velocity (delta) in world/probe frame.
 
     This keeps the first predicted point continuous w.r.t. the last probe point, and blends the
     first velocity to preserve the probe's exiting direction.
@@ -249,8 +249,7 @@ def smooth_prediction_by_twist_6d(
     blend_first_step_rot: float = 0.8,
     eps: float = 1e-12,
 ):
-    """
-    Smooth 6D predicted trajectory by smoothing per-step twist in WORLD/PROBE frame, using quaternions for rotation:
+    """Smooth 6D predicted trajectory by smoothing per-step twist in WORLD/PROBE frame, using quaternions for rotation:
         - translation part: smooth Δp (world-frame)
         - rotation part: smooth ω where Exp(ω) = quat_inv(q_{t}) * q_{t+1}  (body-frame incremental rotation)
     
@@ -358,8 +357,7 @@ def process_csv(
     static_ang_eps_deg: float = 1.2,
     static_min_run: int = 8,
 ):
-    """
-    Process raw CSV file by adding time column and downsampling.
+    """Process raw CSV file by adding time column and downsampling.
 
     Args:
         input_path: str, path to raw CSV file with columns [time, x, y, z, qx, qy, qz, qw]
@@ -445,8 +443,7 @@ def save_reference_raw_to_csv(
     *,
     dt: float = 0.05,
 ):
-    """
-    Save raw reference trajectory (position + quaternion) to CSV.
+    """Save raw reference trajectory (position + quaternion) to CSV.
 
     Args:
         filepath: str, output CSV file path
@@ -503,8 +500,7 @@ def save_probe_raw_to_csv(
     *,
     dt: float = 0.05,
 ):
-    """
-    Save raw probe trajectory (position + quaternion) to CSV.
+    """Save raw probe trajectory (position + quaternion) to CSV.
 
     Args:
         filepath: str, output CSV file path
@@ -557,28 +553,32 @@ def save_probe_raw_to_csv(
 def save_predictions_to_csv(
     filepath: str,
     preds: np.ndarray,
-    preds_quat: np.ndarray,
+    preds_quat: np.ndarray | None,
     *,
     dt: float = 0.005,
 ):
-    """
-    Save GP predicted trajectory (position + quaternion) to CSV.
+    """Save GP predicted trajectory (position + quaternion) to CSV.
 
     Args:
         filepath: str, output CSV file path
         preds: (N, 3) np.ndarray, predicted positions
-        preds_quat: (N, 4) np.ndarray, predicted orientations as quaternions [w, x, y, z]
+        preds_quat: Optional (N, 4) predicted orientations as quaternions
+            [w, x, y, z]. If omitted, identity quaternions are written.
         dt: float, time step between predictions (for generating timestamps)
     """
-    if preds is None or preds_quat is None:
-        raise ValueError("preds or preds_quat is None")
+    if preds is None:
+        raise ValueError("preds is None")
 
     P = np.asarray(preds, dtype=np.float64)
-    Q = np.asarray(preds_quat, dtype=np.float64)
+    N = len(P)
+
+    if preds_quat is None:
+        Q = np.zeros((N, 4), dtype=np.float64)
+        Q[:, 0] = 1.0
+    else:
+        Q = np.asarray(preds_quat, dtype=np.float64)
 
     assert len(P) == len(Q), f"Length mismatch: preds has {len(P)} points, preds_quat has {len(Q)} points"
-
-    N = len(P)
 
     with open(filepath, "w", newline="") as f:
         writer = csv.writer(f)
@@ -603,13 +603,63 @@ def save_predictions_to_csv(
 
     print(f"[Save] Predictions saved to {filepath}")
 
+def save_similarity_transform_to_json(
+    filepath: str,
+    R: np.ndarray,
+    s: float,
+    t: np.ndarray,
+    *,
+    skill_name: str,
+    match_ms: float,
+    j_end: int,
+) -> None:
+    """Save a similarity transform and its matching metadata to JSON.
+
+    The output format matches the existing ``similarity_transform_*.json``
+    files under ``data``.
+
+    Args:
+        filepath: Output JSON file path.
+        R: Rotation matrix with shape (3, 3).
+        s: Isotropic scale factor.
+        t: Translation vector with shape (3,).
+        skill_name: Name of the matched skill.
+        match_ms: Skill-matching duration in milliseconds.
+        j_end: End index of the matched reference segment.
+
+    Raises:
+        ValueError: If the rotation matrix or translation vector has an
+            invalid shape.
+    """
+    R_arr = np.asarray(R, dtype=np.float64)
+    t_arr = np.asarray(t, dtype=np.float64).reshape(-1)
+
+    if R_arr.shape != (3, 3):
+        raise ValueError(f"Expected R shape (3, 3), got {R_arr.shape}")
+    if t_arr.shape != (3,):
+        raise ValueError(f"Expected t shape (3,), got {t_arr.shape}")
+
+    payload = {
+        "skill_name": str(skill_name),
+        "match_ms": round(float(match_ms), 3),
+        "j_end": int(j_end),
+        "s": round(float(s), 8),
+        "t": [round(float(v), 8) for v in t_arr.tolist()],
+        "R": [[round(float(v), 8) for v in row] for row in R_arr.tolist()],
+    }
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+        f.write("\n")
+
+    print(f"[Save] Similarity transform saved to {filepath}")
+
 # ============================================================
 # Plot helpers
 # ============================================================
 
 def piecewise_quat_slerp_path(ref_seg: np.ndarray, t_samples: np.ndarray) -> np.ndarray:
-    """
-    Piecewise SLERP along ref_seg keyframes in [w,x,y,z], parameter t in [0,1]
+    """Piecewise SLERP along ref_seg keyframes in [w,x,y,z], parameter t in [0,1]
     from first to last quaternion.
 
     Args:
@@ -649,8 +699,7 @@ def plot_orientation_error(
     start_idx: int,
     R_ref_probe: np.ndarray,
 ) -> np.ndarray:
-    """
-    Plot orientation error trend between reference and predicted quaternions, 
+    """Plot orientation error trend between reference and predicted quaternions,
     after SLERP alignment and removing initial offset.
 
     Args:

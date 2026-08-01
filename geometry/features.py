@@ -2,13 +2,12 @@ import torch
 
 
 def spherical_feat_from_xyz_torch(xyz: torch.Tensor, origin: torch.Tensor) -> torch.Tensor:
-    """
-    Convert xyz positions to spherical-like features (r, cos(az), sin(az), cos(el), sin(el)) w.r.t. origin.
+    """Convert xyz positions to spherical-like features (r, cos(az), sin(az), cos(el), sin(el)) w.r.t. origin.
 
     Notes:
-    - azimuth az = atan2(y, x)
-    - elevation el = atan2(z, sqrt(x^2+y^2))
-    - Use trig encoding to avoid angle wrap discontinuity.
+        - azimuth az = atan2(y, x)
+        - elevation el = atan2(z, sqrt(x^2+y^2))
+        - Use trig encoding to avoid angle wrap discontinuity.
 
     Args:
         xyz: torch.Tensor of shape (..., 3)
@@ -32,8 +31,7 @@ def spherical_feat_from_xyz_torch(xyz: torch.Tensor, origin: torch.Tensor) -> to
     return feats
 
 def direction_feat_from_xyz_torch(xyz, origin, eps: float = 1e-8):
-    """
-    Return stable 3D "direction" features [r, ux, uy, uz] for each point.
+    """Return stable 3D "direction" features [r, ux, uy, uz] for each point.
 
     Args:
         xyz: torch tensor of shape (..., 3)
